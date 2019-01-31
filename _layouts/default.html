@@ -1,21 +1,36 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 
 {% include head.html %}
 
-<!-- hack iOS CSS :active style -->
-<body ontouchstart="">
+<body>
 
-    {% include nav.html %}
+<div class="container">
 
+  {% include header.html %}
+
+  {% if site.default_column == "two" %}  
+
+  <div class="page-content col-sm-8">
     {{ content }}
+    {% include post_pagination.html %}
+  </div>
+  {% include sidebar.html %}
 
-    {% include footer.html %}
+  {% else %}
 
+  <div class="page-content">
+    <div class="wrapper">
+      {{ content }}
+    </div>
+  </div>
+  {% include post_pagination.html %}
 
-<!-- Image to hack wechat -->
-<img src="/img/icon_wechat.png" width="0" height="0" />
-<!-- Migrate from head to bottom, no longer block render and still work -->
+  {% endif %}
+
+  {% include footer.html %}
+
+</div>
 
 </body>
 

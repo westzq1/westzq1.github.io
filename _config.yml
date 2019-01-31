@@ -1,43 +1,61 @@
-# Welcome to Jekyll!
-#
-# This config file is meant for settings that affect your whole blog, values
-# which you are expected to set up once and rarely edit after that. If you find
-# yourself editing this file very often, consider using Jekyll's data files
-# feature for the data you need to update frequently.
-#
-# For technical reasons, this file is *NOT* reloaded automatically when you use
-# 'bundle exec jekyll serve'. If you change this file, please restart the server process.
+title:              ORA-4031
+tagline:            A Chinese DBA in the United States
+author:             Qiao Zhang
+email:              westzq@gmail.com
+description:        Oracle & MySQL & Banner DBA
+keywords:           Oracle, Mysql, Banner
+baseurl:  
+url:                https://westzq1.github.io
+locale:             en_US
 
-# Site settings
-# These are used to personalize your new site. If you look in the HTML files,
-# you will see them accessed via {{ site.title }}, {{ site.email }}, and so on.
-# You can create any custom variable you would like, and they will be accessible
-# in the templates via {{ site.myvariable }}.
-title: Your awesome title
-email: your-email@example.com
-description: >- # this means to ignore newlines until "baseurl:"
-  Write an awesome description for your new site here. You can edit this
-  line in _config.yml. It will appear in your document head meta (for
-  Google search results) and in your feed.xml site description.
-baseurl: "" # the subpath of your site, e.g. /blog
-url: "" # the base hostname & protocol for your site, e.g. http://example.com
-twitter_username: jekyllrb
-github_username:  jekyll
+twitter_username:   westzq
+github_username:    westzq1
+disqus_shortname:   zhangqiaoc
+favicon: 
+aboutme:            Hi, this is Qiao Zhang</br>I am sharing my case and experience of Databases here.
+aboutme_photo:      /images/my1.jpeg
+google_analytics_key:                           
 
-# Build settings
+ShowContactInfo:    "True" # Personal Info (twitter,github,email) can be seen on aboutme-sidebar, those info only shown where ShowContactInfo == True
+default_column:     "two" # blog style: two columns, if default_column != "two", you will see a one column blog.
+default_locale:     "en" # blog sidebar language set, only include: English (en), Chinese (cn), Japanese (jp), Polish (pl), Korean (kr),  Russian (ru), Turkish (tr), and Indonesian (id).
+
+locales:
+    en:
+      Aboutme: "About Me"
+      Archives: "Archives"
+      Blogroll: "Blogroll"
+      Categories: "Categories"
+      Copyright_Notice: "Copyright Notice"
+      Recent_Posts: "Recent Posts"
+      Tags: "Tags"
+      Previous: "Older"
+      Next: "Newer"
+      PostedInCategories: "Posted in"
+      Taggedwith: "and tagged"
+      PostDate: "on "
+      Google_search: "Site Search"
+      Home: "Home"
+      About: "About"
+      Guestbook: "Guestbook"
+      Subscribe: "Subscribe"
+
+
+Blogroll:
+#      - name: Freshman
+#        href: http://yulijia.net/freshman
+#        title: Another Jekyll blog theme
+#      - name: author's website
+#        href: http://yulijia.net/
+#        title: Lijia Yu's website
+
+
+### Build settings
 markdown: kramdown
-theme: jekyll-theme-hacker
-plugins:
-  - jekyll-feed
-
-# Exclude from processing.
-# The following items will not be processed, by default. Create a custom list
-# to override the default setting.
-# exclude:
-#   - Gemfile
-#   - Gemfile.lock
-#   - node_modules
-#   - vendor/bundle/
-#   - vendor/cache/
-#   - vendor/gems/
-#   - vendor/ruby/
+#highlighter: pygments
+kramdown:
+        input: GFM
+        syntax_highlighter: rouge
+plugins: [jekyll-paginate]
+paginate: 5
+excerpt_separator: <!-- more -->
