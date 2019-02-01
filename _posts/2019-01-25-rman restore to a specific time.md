@@ -10,10 +10,10 @@ comments: true
 Restore database preview can be used to achieve this goal.
 It can be done on the local database, but it is also can be done with catalog on the another box.
 
-On the source database
+<b>On the source database</b>
 1. Get the dbid from v$database
 
-On a different box
+<b>On a different box</b>  
 1. Create pwd file, password doesn't need to be the same with the source.
 2. Create pfile , only one parameter is needed, *.db_name=xxxx
 3. Set ORACLE_SID, start instance to nomount.
@@ -29,16 +29,16 @@ set until time "to_date('Jan 7 2019 17:30:00','Mon DD YYYY HH24:MI:SS')";
 restore database preview;
 }
 </pre>
-
+<br />
 But there is no guarantee that all backup pieces are there, it would be better to check it with <span style="color:#ff0000;"><strong>CROSSCHECK</strong></span>
 
 <pre class="prettyprint lang-sql linenums=1 ">
 CROSSCHECK BACKUP DEVICE TYPE DISK COMPLETED BETWEEN '07-JAN-19' AND '08-JAN-19';
 CROSSCHECK BACKUPSET 1338, 1339, 1340;
 </pre>
-
+<br />
 Before Restore, we can use <span style="color:#ff0000;"><strong>RESTORE DATABASE VALIDATE</strong></span> to make sure the recoverable of backup pieces. We can also use <strong><span style="color:#ff0000;">VALIDATE BACKUPSET</span> </strong>to check a particular backup piece.
-
+<br />
 The output of RESTORE DATABASE PREVIEW below.
 The all backup pieces this restore needs are list, including LEVEL0, LEVEL2, and Archive log.
 <pre class="prettyprint lang-sql linenums=1 ">

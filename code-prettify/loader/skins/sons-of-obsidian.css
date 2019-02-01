@@ -56,16 +56,17 @@ pre.prettyprint
 
 
 ol.linenums {  
- margin: 0 0 0 50px; 
+ margin: 0 0 0 35px; 
 }  
 
 ol.linenums li {  
  padding-left: 13px;  
  color: #239821;  
- line-height: 18px;  
+ line-height: 15px;  
 }  
 
 .prettyprint {
+    font-size: 9pt;
     background: #000;
 }
 li.L0, li.L1, li.L2, li.L3, li.L4, li.L5, li.L6, li.L7, li.L8, li.L9
@@ -74,7 +75,7 @@ li.L0, li.L1, li.L2, li.L3, li.L4, li.L5, li.L6, li.L7, li.L8, li.L9
     list-style-type: decimal;
 }
 li.L1, li.L3, li.L5, li.L7, li.L9 {
-    background: #111;
+    background: #222;
 }
 
 @media print
