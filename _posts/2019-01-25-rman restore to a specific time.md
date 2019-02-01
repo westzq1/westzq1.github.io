@@ -24,7 +24,7 @@ rman target /
 connect catalog rman/xxxxx@CATALOG_DB
 
 run {
-set <span>DBID </span>451988051;
+set DBID 451988051;
 set until time "to_date('Jan 7 2019 17:30:00','Mon DD YYYY HH24:MI:SS')";
 restore database preview;
 }
