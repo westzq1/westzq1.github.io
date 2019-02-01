@@ -1,6 +1,6 @@
 ---
 layout: post
-title: How to check whether RMAN can restore the database to a specific time
+title: Oracle - How to check whether RMAN can restore the database to a specific time?
 modified: 2019-01-25
 categories: [Oracle]
 tags: 

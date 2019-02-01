@@ -4,24 +4,11 @@ title: About
 comments: yes
 permalink: /about/
 ---
-
-
-### Freshman21 is a Jekyll theme.
-
-A tribute to Twenty Twelve and Twenty eleven.
-
-I like wordpress's theme Twenty Twelve and Twenty eleven very much. 
-So I called my Jekyll theme Freshman21 (Freshman <q>twenty-first</q> , it means twenty-first century, not twenty-one), this theme is based on my former theme [Freshman](https://github.com/yulijia/freshman/).
-
-Freshman21 have two main page format, one is [single column](http://yulijia.net/en/  "see demo"), the other is two columns. For more details, please see the articles on the site.
-
-<cite>Proudly enjoy using Freshman21 theme.</cite> <code>;)</code>
-
-![麋鹿](https://i.imgur.com/Mdc4szJl.jpg){: .img-about}
-
-#### Hi, the picture you have seen in the sample-page is a Père David's deer photoed by my friend at Beijing Milu Park, China.
-
-Milu(麋鹿) is the chinese name of Père David's deer.
-
-
-
+<font size="3">
+<p>Hi, this is Qiao Zhang.</p>
+<p>I have ten years Oracle Database administration experience in managing databases of telecommunication industry in China. </p>
+<p>I am proficient and well-experienced in Oracle9i/10g/11g/12c under AIX/Linux/HP-UX/Solaris/Windows/Exadata, extensive knowledge in management and deployment of Oracle RAC, DataGuard. Streams, and GoldenGate.</p>
+<p>I am also an expert on MySQL & NDBCluster.</p>
+<p>I got my bachelor degree in Computer Science from University of Electronic Science and Technology of China in 2006, got Oracle 9i OCP in 2008, got my master degree in Computer Science with GPA 4.0 from The State University of New York at Binghamton in 2018. </p>
+<p>Now, I am working at Old Dominion University, Norfolk, VA as a database administer.</p>
+</font>
