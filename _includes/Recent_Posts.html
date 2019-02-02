@@ -1,8 +1,8 @@
 <div class="sidebar-module">
   <h4>{{ site.locales[site.default_locale].Recent_Posts }}</h4>
-  {% for post in site.posts limit:5 %}
+  {% for post in site.posts limit:10 %}
   <li>
-  <a href="{{ site.baseurl }}{{ post.url }}" title="{{ post.title }}" rel="bookmark">{{ post.title }}</a>
+  <a href="{{ site.baseurl }}{{ post.url }}" title="{{ post.title }}" rel="bookmark">&gt; {{ post.title }}</a>
   </li>
   {% endfor %}
 </div>

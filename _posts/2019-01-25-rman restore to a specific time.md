@@ -4,7 +4,7 @@ title: Oracle - How to check whether RMAN can restore the database to a specific
 modified: 2019-01-25
 categories: [Oracle]
 tags: 
-  - Oracle.RECOVERY
+  - Oracle.Recovery
 comments: true
 ---
 Restore database preview can be used to achieve this goal.
