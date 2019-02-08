@@ -8,6 +8,8 @@ tags:
 comments: true
 ---
 
+Unfinished!!!!!!
+
 Many DBAs may never pay attentions on this topic. I talked with some of my friends about how to make the application failover smoothly, the answer is TAF.
 
 Actually, TAF is a failover machnism for type 2 driver, like OCI. It is not working on JDBC Thin which is a type 4 driver.
