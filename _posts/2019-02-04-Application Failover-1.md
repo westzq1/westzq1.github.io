@@ -258,7 +258,33 @@ ons.jar, ucp.jar ,and the jdbc driver jar file should in the CLASSPATH
 
 
 Now, I know what is TAF, FCF, FAN, and ONS, and our application can survive from the node / instance failure. 
-But for TAF / FCF, it only affored the failover of SELECT statement, the transaction have to be rollback after failover.
+But there is still a lot of side effect of failover we should be dealing with.
+for example: the nls setting is not the same if we don't implement callback function.
+<pre class="prettyprint lang-sql linenums=1 ">
+INSTANCE_NUMBER
+---------------
+	      2
+
+SQL> alter session set nls_date_format = 'yyyymmdd hh24miss';
+
+Session altered.
+
+SQL> select sysdate from dual;
+
+SYSDATE
+---------------
+20190208 160028
+
+-- kill the instance 2
+
+SQL> /
+
+SYSDATE
+---------------
+08-FEB-19
+</pre>
+
+And, the transaction have to be rollback after failover.
 <pre class="prettyprint lang-sql linenums=1 ">
 
 INSTANCE_NUMBER
@@ -297,7 +323,7 @@ INSTANCE_NUMBER
 	      2
 </pre> 
 
-From 12.1, Oracle affords Application Continuity with Transaction Guard to handle this. <br/>
+From 12.1, Oracle affords Application Continuity with Transaction Guard to handle callback and transaction failover. <br/>
 For 12.1, AC is only supported on Java, from 12.2, AC can be used on OCI, ODP.net
 
 How to enable Application Continuity on Service?<br/>
@@ -321,9 +347,11 @@ I tested with sqlplus, but AC is not working, the ORA-41412 is always reported, 
 But, it is working fine with JDBC
     How To Test Application Continuity Using A Standalone Java Program (Doc ID 1602233.1)	
 
-However, the code has some problem, we modified a little bit.<br/>
+However, the code has some problems, we modified a little bit to demo NLS_DATE_FORMAT replay and transaction failover.<br/>
 The sql we want to pretect should be in between beginRequest() and endRequest() functions.<br/>
 <pre class="prettyprint lang-java linenums=1 ">
+
+
 import java.sql.*;
 import oracle.jdbc.*;
 public class AcTest
@@ -331,7 +359,7 @@ public class AcTest
 public static void main(String[] args) throws SQLException,java.lang.InterruptedException
 {
 oracle.jdbc.replay.OracleDataSource  AcDatasource = oracle.jdbc.replay.OracleDataSourceFactory.getOracleDataSource();
-AcDatasource.setURL("jdbc:oracle:thin:@rac-scan.rac.database.zhangqiaoc.com:1521/acservice");
+AcDatasource.setURL("jdbc:oracle:thin:@rac-scan.rac.database.zhangqiaoc.com:1521/ac");
 AcDatasource.setUser("CTAIS2");
 AcDatasource.setPassword("oracle");
 
@@ -341,26 +369,33 @@ conn.setAutoCommit(false);
 
 PreparedStatement stmt = conn.prepareStatement("select instance_name from v$instance");
 ResultSet rset = stmt.executeQuery();
-while (rset.next())
-{
+while (rset.next()){
 System.out.println("You are Connected to RAC Instance - "+ rset.getString(1));
 }
 
+
 // the code you want to protected should in between begin and end
 ((oracle.jdbc.replay.ReplayableConnection)conn).beginRequest();
-
+stmt = conn.prepareStatement("alter session set nls_date_format='yyyymmdd hh24miss'");
+stmt.execute();
 stmt = conn.prepareStatement("insert into test1 values(1)");
 stmt.execute();
-
-// shutdown the pdb here
 Thread.currentThread().sleep(60000);
 
+// shutdown the pdb here
 PreparedStatement stmt1 = conn.prepareStatement("select instance_name from v$instance");
 ResultSet rset1 = stmt1.executeQuery();
-while (rset1.next())
-{
+while (rset1.next()){
 System.out.println("After Replay Connected to RAC Instance - "+rset1.getString(1));
+}
+
+// NLS_DATE_FORMAT is replayed. 
+stmt1 = conn.prepareStatement("select value from v$nls_parameters where parameter='NLS_DATE_FORMAT'");
+rset1 = stmt1.executeQuery();
+while (rset1.next()){
+System.out.println("NLS_DATE_FORMAT: "+rset1.getString(1));
 } 
+
 
 // finally, we can see the new record 
 conn.commit(); 
@@ -387,8 +422,8 @@ $ java -Djava.ext.dirs=/u01/app/oracle/product/18.3/db_1/jdbc/lib:/u01/app/oracl
 You are Connected to RAC Instance - orcl1
 # shutdown instance 1
 After Replay Connected to RAC Instance - orcl2
+NLS_DATE_FORMAT: yyyymmdd hh24miss
 </pre>
-
 
 
 Database Connection and Failover Errors Recognized by DBService (Doc ID 2268932.1)	
@@ -399,3 +434,5 @@ Failover-related errors
     ORA-25408	Can not safely replay call
     ORA-25409	Failover happened during the network operation (lost on fetching a LOB column)
     ORA-25425	Connection lost during rollback
+    
+    
