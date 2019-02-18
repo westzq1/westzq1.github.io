@@ -8,7 +8,7 @@ tags:
 comments: true
 ---
 
-The Application Containers is a new feature on multi-tenant database in 12.2. 
+The Application Containers is a new feature on multi-tenant datab
 
 It is working with the feature like 
 
