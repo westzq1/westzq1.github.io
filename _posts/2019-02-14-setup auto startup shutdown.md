@@ -118,7 +118,7 @@ First, remove chkconfig
 </pre>
 
 Next, create systemd service
-<pre class="prettyprint lang-sql linenums=1 ">
+<pre class="prettyprint lang-sh linenums=1 ">
 # mkdir /l01/app/oracle/scripts
 # touch /l01/app/oracle/scripts/start_all.sh
 
