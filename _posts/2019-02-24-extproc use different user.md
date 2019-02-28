@@ -354,4 +354,5 @@ So, in order to control the behavior of EXTPROC
 1. always use listener to spawn EXTPROC
 2. use credential to restrict the EXTPROC the database spawned in the less privileged user.
 3. do not store .so file in the LD_LIBRARY_PATH, using listener to locate .so
-4.
+4. use ENVS="EXTPROC_DLLS=ONLY:/home/oracle/lib/shell.so" in listener to restrict the .so the user can use.
+5. never give create library and grant the use of library to end user directly, use procedure to encapsulate it, and only give the execute privilege on this procedure to end user.
