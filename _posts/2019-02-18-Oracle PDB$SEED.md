@@ -218,16 +218,26 @@ PL/SQL procedure successfully completed.
 </pre>         
 
 
-Do I need to patch PDB$SEED manually?
+<span style="color:#ff0000;"><strong>Do I need to patch PDB$SEED manually?</strong></span><br/>
+Patching the PDB$SEED (Doc ID 2038564.1)	<br/>
+PDB$SEED patching is automatically handled through datapatch so we shouldn't have to manually patch the PDB$SEED.
 
-
-
-
-
-
-
-
-What can I redefine when create a new PDB from PDB$SEED?
-
-
-
+<span style="color:#ff0000;"><strong>What can I redefine when create a new PDB from PDB$SEED?
+</strong></span><br/>
+<pre class="prettyprint lang-sql linenums=1 ">
+create pluggable database pdb1 
+admin user ctais2 identified by oracle roles=(dba)
+parallel 2
+default tablespace test datafile size 10M
+storage unlimited
+tempfile reuse
+logging
+-- file_name_convert    # useful is we don't use OMF
+-- create_file_dest     # useful is we don't use OMF
+-- service_name_convert # there is no other service in the PDB$SEED
+-- path_prefix          # used to restrict the path of directory objects
+-- standbys             # used to exclude this PDB in the standby side
+-- user_tablespaces     # not useful, PDB$SEED doesn't have other tablespaces
+-- host= port=          # not useful, we create from PDB locally.
+/
+</pre>
