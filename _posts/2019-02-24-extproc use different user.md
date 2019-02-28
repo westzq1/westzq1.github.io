@@ -1,6 +1,6 @@
 ---
 layout: post
-title: Oracle - Run extproc with different user
+title: Oracle - spawn extproc by listener or database
 modified: 2019-02-24
 categories: [Oracle]
 tags: 
