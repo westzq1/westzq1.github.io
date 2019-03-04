@@ -1,0 +1,508 @@
+---
+layout: post
+title: Oracle - RMAN Backup Policy with KEEP
+modified: 2019-03-02
+categories: [Oracle]
+tags: 
+  - Oracle.Recovery
+comments: true
+---
+
+Our RMAN Obsolete is not working, the utilization ratio of backup file system reaches 90% percent. The former DBA uses his own script to choose backup set to delete, and they also use “find +mtime” and “rm” to delete backup.
+
+It is very dangerous, especially then OPTIMIZATION is ON and there is a read only tablespace or pluggable read only database like 'PDB$SEED'. RMAN only backup them one time. If the backup piece are removed without crosscheck, they is no backup for them anymore.
+
+I redesign the backup and obsolete policy, depends on our requirement.
+1. Backup retention window is 7 days.
+2. Every week do a level 0 backup with 6 level 1 or 2 backup.
+3. The first level 0 backup each month needs to keep 1 year.
+4. The level 0 backup for every week needs to keep 5 weeks, but level 1 and 2 doesn’t need.
+
+I am using KEEP UNTIL to achieve the long term keep policy.
+But, we needs to know what the keep exactly does:
+1.The backup database with KEEP will backup the archive log which needed for recovery to consistent situation, controlfile, spfile and even the read only tablespace  automatically. We don’t need to backup them especially.
+<pre class="prettyprint lang-sql linenums=1 ">
+using channel ORA_DISK_1
+backup will be obsolete on date 01-APR-19
+archived logs required to recover from this backup will be backed up
+channel ORA_DISK_1: starting compressed archived log backup set
+channel ORA_DISK_1: specifying archived log(s) in backup set
+input archived log thread=1 sequence=1202 RECID=1201 STAMP=996374548
+channel ORA_DISK_1: starting piece 1 at 01-JAN-19
+channel ORA_DISK_1: finished piece 1 at 01-JAN-19
+piece handle=/u01/app/oracle/backup/O12201/ora_df996374548_s3121_s1 tag=20180101010000_LEVEL0_MONTHLY comment=NONE
+channel ORA_DISK_1: backup set complete, elapsed time: 00:00:01
+
+using channel ORA_DISK_1
+backup will be obsolete on date 01-APR-19
+archived logs required to recover from this backup will be backed up
+channel ORA_DISK_1: starting compressed full datafile backup set
+channel ORA_DISK_1: specifying datafile(s) in backup set
+including current SPFILE in backup set
+channel ORA_DISK_1: starting piece 1 at 01-JAN-19
+channel ORA_DISK_1: finished piece 1 at 01-JAN-19
+piece handle=/u01/app/oracle/backup/O12201/ora_df996374550_s3122_s1 tag=20180101010000_LEVEL0_MONTHLY comment=NONE
+channel ORA_DISK_1: backup set complete, elapsed time: 00:00:01
+
+using channel ORA_DISK_1
+backup will be obsolete on date 01-APR-19
+archived logs required to recover from this backup will be backed up
+channel ORA_DISK_1: starting compressed full datafile backup set
+channel ORA_DISK_1: specifying datafile(s) in backup set
+including current control file in backup set
+channel ORA_DISK_1: starting piece 1 at 01-JAN-19
+channel ORA_DISK_1: finished piece 1 at 01-JAN-19
+piece handle=/u01/app/oracle/backup/O12201/ora_df996374551_s3123_s1 tag=20180101010000_LEVEL0_MONTHLY comment=NONE
+channel ORA_DISK_1: backup set complete, elapsed time: 00:00:01
+Finished backup at 01-JAN-19
+</pre>
+2.The incremental level 0 backup with KEEP cannot be used as the baseline of level 1 and level 2, due to it is out of retention policy. You will see an information “no parent backup or copy of datafile 1 found”, and RMAN will take an level 1 backup as level 0. And this backup will be used as the baseline of all level 1 and 2 forever after, if there was no another backup without keep. So a separate level 0 backup is needed. 
+<p dir="ltr" style="margin-left: 20px; margin-right: 0px">Incremental Level 1 Backup Taking a Level 0 Backup Although Previous Level 0 exists (Doc ID 2023948.1)	</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+using channel ORA_DISK_1                                                            
+backup will be obsolete on date 08-JAN-19                                           
+archived logs required to recover from this backup will be backed up                
+no parent backup or copy of datafile 1 found                                        
+no parent backup or copy of datafile 3 found                                        
+no parent backup or copy of datafile 4 found                                        
+no parent backup or copy of datafile 7 found                                        
+no parent backup or copy of datafile 6 found                                        
+no parent backup or copy of datafile 5 found                                        
+no parent backup or copy of datafile 8 found                                        
+no parent backup or copy of datafile 10 found                                       
+no parent backup or copy of datafile 9 found                                        
+no parent backup or copy of datafile 11 found                                       
+channel ORA_DISK_1: starting compressed incremental level 0 datafile backup set     
+</pre>
+
+3.If the database has read only tablespace and optimization is not set to ON, the all backup set of read only tablespace cannot be obsolete with recovery window policy. We need to use redundancy policy.
+
+The following is my test script on VM. We have to disable VM to synchronize time automatically in advance.<br/>
+For testing, I only keep monthly backup for 90 days and weekly for 32 days.
+<pre class="prettyprint lang-sh linenums=1 ">
+RMAN> CONFIGURE RETENTION POLICY TO RECOVERY WINDOW OF 7 DAYS;
+RMAN> CONFIGURE BACKUP OPTIMIZATION ON;
+
+RO="su - oracle -c "
+RMAN="export ORACLE_SID=o12201; export ORAENV_ASK=NO; . oraenv; rman target / "
+timedatectl set-ntp no
+for YEAR in {2018..2018}
+do
+  for MONTH in {1..6}
+  do
+    for DAY in {1..28}
+    do
+      for HOUR in {0,6,12,18}
+      do 
+        echo $$
+        n=$(($DAY%7))
+        # echo $YEAR" "$MONTH" "$DAY" "$HOUR" "$n;
+        timedatectl set-time "$YEAR-$MONTH-$DAY $HOUR:00:00";
+        if [[ $n -eq 1 && $DAY -le 7 && HOUR -eq 0 ]]; then
+          echo "lev0 monthly backup"
+$RO "$RMAN <<EOF
+backup incremental level 0 as compressed backupset tag '`date +%Y%m%d%H`_lev0_monthly' database keep until time 'sysdate+90' include current controlfile;
+backup incremental level 0 as compressed backupset tag '`date +%Y%m%d%H`_lev0_daily' database include current controlfile plus archivelog delete input not backed up 1 times;
+EOF
+"
+        elif [[ $n -eq 1 && $DAY -ge 8 && HOUR -eq 0 ]]; then
+          echo "lev0 weekly backup"
+$RO "$RMAN <<EOF
+backup incremental level 0 as compressed backupset tag '`date +%Y%m%d%H`_lev0_weekly' database keep until time 'sysdate+32' include current controlfile;
+backup incremental level 0 as compressed backupset tag '`date +%Y%m%d%H`_lev0_daily' database include current controlfile plus archivelog delete input not backed up 1 times;
+EOF
+"
+        elif [[ $n -ne 1 && HOUR -eq 0 ]]; then
+          echo "lev1 daily backup"
+$RO "$RMAN <<EOF
+backup incremental level 1 as compressed backupset tag '`date +%Y%m%d%H`_lev1_daily' database include current controlfile plus archivelog delete input not backed up 1 times;
+EOF
+"
+        else
+          echo "archive log backup"
+$RO "$RMAN <<EOF
+backup as compressed backupset archivelog all delete input not backed up 1 times;
+EOF
+"
+        fi
+      done
+    done
+  done
+done
+</pre>
+
+
+Execute DELETE OBSOLETE after backup finished.<br/>
+To display, I just show the backup of HR. We can see there is: <br/>
+1. 3 MONTHLY backups for April, May, and June
+2. 3 WEEKLY backups - the backup of June 1st is MONTHLY.
+3. 1 level 0 daily plus 6 level 1 daily.
+<pre class="prettyprint lang-sql linenums=1 ">
+RMAN>  list backup of pluggable database 'HR' summary;
+
+
+List of Backups
+===============
+Key     TY LV S Device Type Completion Time #Pieces #Copies Compressed Tag
+------- -- -- - ----------- --------------- ------- ------- ---------- ---
+4009    B  0  A DISK        01-APR-18       1       1       YES        2018040100_LEV0_MONTHLY
+4369    B  0  A DISK        01-MAY-18       1       1       YES        2018050100_LEV0_MONTHLY
+4729    B  0  A DISK        01-JUN-18       1       1       YES        2018060100_LEV0_MONTHLY
+4819    B  0  A DISK        08-JUN-18       1       1       YES        2018060800_LEV0_WEEKLY
+4909    B  0  A DISK        15-JUN-18       1       1       YES        2018061500_LEV0_WEEKLY
+4999    B  0  A DISK        22-JUN-18       1       1       YES        2018062200_LEV0_WEEKLY
+5006    B  0  A DISK        22-JUN-18       1       1       YES        2018062200_LEV0_DAILY
+5018    B  1  A DISK        23-JUN-18       1       1       YES        2018062300_LEV1_DAILY
+5030    B  1  A DISK        24-JUN-18       1       1       YES        2018062400_LEV1_DAILY
+5042    B  1  A DISK        25-JUN-18       1       1       YES        2018062500_LEV1_DAILY
+5054    B  1  A DISK        26-JUN-18       1       1       YES        2018062600_LEV1_DAILY
+5066    B  1  A DISK        27-JUN-18       1       1       YES        2018062700_LEV1_DAILY
+5078    B  1  A DISK        28-JUN-18       1       1       YES        2018062800_LEV1_DAILY
+</pre> 
+
+Read only tablespace / pluggable database will be backup at the every backup with keep, and only have one backup at the very first time(2018010100) and never backup again when OPTIMIZATION is ON.
+<pre class="prettyprint lang-sql linenums=1 ">
+RMAN> list backup of pluggable database 'PDB$SEED' summary;
+
+
+List of Backups
+===============
+Key     TY LV S Device Type Completion Time #Pieces #Copies Compressed Tag
+------- -- -- - ----------- --------------- ------- ------- ---------- ---
+2936    B  0  A DISK        01-JAN-18       1       1       YES        2018010100_LEV0_DAILY
+4010    B  0  A DISK        01-APR-18       1       1       YES        2018040100_LEV0_MONTHLY
+4370    B  0  A DISK        01-MAY-18       1       1       YES        2018050100_LEV0_MONTHLY
+4730    B  0  A DISK        01-JUN-18       1       1       YES        2018060100_LEV0_MONTHLY
+4820    B  0  A DISK        08-JUN-18       1       1       YES        2018060800_LEV0_WEEKLY
+4910    B  0  A DISK        15-JUN-18       1       1       YES        2018061500_LEV0_WEEKLY
+5000    B  0  A DISK        22-JUN-18       1       1       YES        2018062200_LEV0_WEEKLY
+</pre>
+Each backup with KEEP have the backup of controlfile, spfile, and read only. All entries which needed to restore the whole database will be included. 
+<pre class="prettyprint lang-sql linenums=1 ">
+RMAN> list backup tag='2018040100_LEV0_MONTHLY';
+
+
+List of Backup Sets
+===================
+
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+4008    Incr 0  313.03M    DISK        00:01:16     01-APR-18      
+        BP Key: 4008   Status: AVAILABLE  Compressed: YES  Tag: 2018040100_LEV0_MONTHLY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df972259203_s4205_s1
+        Keep: BACKUP_LOGS        Until: 30-JUN-18      
+  List of Datafiles in backup set 4008
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  1    0  Incr 1536226    01-APR-18              NO    /u01/app/oracle/oradata/o12201/system01.dbf
+  3    0  Incr 1536226    01-APR-18              NO    /u01/app/oracle/oradata/o12201/sysaux01.dbf
+  4    0  Incr 1536226    01-APR-18              NO    /u01/app/oracle/oradata/o12201/undotbs01.dbf
+  7    0  Incr 1536226    01-APR-18              NO    /u01/app/oracle/oradata/o12201/users01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+4009    Incr 0  156.45M    DISK        00:00:36     01-APR-18      
+        BP Key: 4009   Status: AVAILABLE  Compressed: YES  Tag: 2018040100_LEV0_MONTHLY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df972259289_s4206_s1
+        Keep: BACKUP_LOGS        Until: 30-JUN-18      
+  List of Datafiles in backup set 4009
+  Container ID: 3, PDB Name: HR
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  9    0  Incr 1536263    01-APR-18              NO    /u01/app/oracle/oradata/o12201/hr/system01.dbf
+  10   0  Incr 1536263    01-APR-18              NO    /u01/app/oracle/oradata/o12201/hr/sysaux01.dbf
+  11   0  Incr 1536263    01-APR-18              NO    /u01/app/oracle/oradata/o12201/hr/undotbs01.dbf
+  12   0  Incr 1536263    01-APR-18              NO    /u01/app/oracle/oradata/o12201/hr/users01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+4010    Incr 0  163.59M    DISK        00:00:45     01-APR-18      
+        BP Key: 4010   Status: AVAILABLE  Compressed: YES  Tag: 2018040100_LEV0_MONTHLY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df972259334_s4207_s1
+        Keep: BACKUP_LOGS        Until: 30-JUN-18      
+  List of Datafiles in backup set 4010
+  Container ID: 2, PDB Name: PDB$SEED
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  5    0  Incr 1442466    01-JAN-19              NO    /u01/app/oracle/oradata/o12201/pdbseed/system01.dbf
+  6    0  Incr 1442466    01-JAN-19              NO    /u01/app/oracle/oradata/o12201/pdbseed/sysaux01.dbf
+  8    0  Incr 1442466    01-JAN-19              NO    /u01/app/oracle/oradata/o12201/pdbseed/undotbs01.dbf
+
+BS Key  Size       Device Type Elapsed Time Completion Time
+------- ---------- ----------- ------------ ---------------
+4011    10.00K     DISK        00:00:00     01-APR-18      
+        BP Key: 4011   Status: AVAILABLE  Compressed: YES  Tag: 2018040100_LEV0_MONTHLY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df972259380_s4208_s1
+        Keep: BACKUP_LOGS        Until: 30-JUN-18      
+
+  List of Archived Logs in backup set 4011
+  Thrd Seq     Low SCN    Low Time  Next SCN   Next Time
+  ---- ------- ---------- --------- ---------- ---------
+  1    1635    1536177    28-MAR-18 1536308    01-APR-18
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+4012    Full    96.00K     DISK        00:00:00     01-APR-18      
+        BP Key: 4012   Status: AVAILABLE  Compressed: YES  Tag: 2018040100_LEV0_MONTHLY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df972259381_s4209_s1
+        Keep: BACKUP_LOGS        Until: 30-JUN-18      
+  SPFILE Included: Modification time: 02-JAN-18
+  SPFILE db_unique_name: O12201
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+4013    Full    2.20M      DISK        00:00:01     01-APR-18      
+        BP Key: 4013   Status: AVAILABLE  Compressed: YES  Tag: 2018040100_LEV0_MONTHLY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df972259383_s4210_s1
+        Keep: BACKUP_LOGS        Until: 3ls 0-JUN-18      
+  Control File Included: Ckp SCN: 1536315      Ckp time: 01-APR-18
+</pre>
+
+How to test whether the backup is recoverable? We can use preview.<br/>
+The target SEQUENCE / SCN is the SEQUENCE / SCN of last archive log in this backup.<br/>
+For this example, it is SEQUENCE 1635 or SCN 1536307.
+<pre class="prettyprint lang-sql linenums=1 ">
+RMAN> run{                        
+2> #set until scn 1536308;   
+3> set until sequence 1636;
+4> restore database preview;
+5> }
+
+executing command: SET until clause
+
+Starting restore at 29-JUN-18
+using channel ORA_DISK_1
+
+
+List of Backup Sets
+===================
+
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+4008    Incr 0  313.03M    DISK        00:01:16     01-APR-18      
+        BP Key: 4008   Status: AVAILABLE  Compressed: YES  Tag: 2018040100_LEV0_MONTHLY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df972259203_s4205_s1
+        Keep: BACKUP_LOGS        Until: 30-JUN-18      
+  List of Datafiles in backup set 4008
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  1    0  Incr 1536226    01-APR-18              NO    /u01/app/oracle/oradata/o12201/system01.dbf
+  3    0  Incr 1536226    01-APR-18              NO    /u01/app/oracle/oradata/o12201/sysaux01.dbf
+  4    0  Incr 1536226    01-APR-18              NO    /u01/app/oracle/oradata/o12201/undotbs01.dbf
+  7    0  Incr 1536226    01-APR-18              NO    /u01/app/oracle/oradata/o12201/users01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+5000    Incr 0  163.59M    DISK        00:00:30     22-JUN-18      
+        BP Key: 5000   Status: AVAILABLE  Compressed: YES  Tag: 2018062200_LEV0_WEEKLY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979430494_s5197_s1
+        Keep: BACKUP_LOGS        Until: 24-JUL-18      
+  List of Datafiles in backup set 5000
+  Container ID: 2, PDB Name: PDB$SEED
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  5    0  Incr 1442466    01-JAN-19              NO    /u01/app/oracle/oradata/o12201/pdbseed/system01.dbf
+  6    0  Incr 1442466    01-JAN-19              NO    /u01/app/oracle/oradata/o12201/pdbseed/sysaux01.dbf
+  8    0  Incr 1442466    01-JAN-19              NO    /u01/app/oracle/oradata/o12201/pdbseed/undotbs01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+4009    Incr 0  156.45M    DISK        00:00:36     01-APR-18      
+        BP Key: 4009   Status: AVAILABLE  Compressed: YES  Tag: 2018040100_LEV0_MONTHLY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df972259289_s4206_s1
+        Keep: BACKUP_LOGS        Until: 30-JUN-18      
+  List of Datafiles in backup set 4009
+  Container ID: 3, PDB Name: HR
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  9    0  Incr 1536263    01-APR-18              NO    /u01/app/oracle/oradata/o12201/hr/system01.dbf
+  10   0  Incr 1536263    01-APR-18              NO    /u01/app/oracle/oradata/o12201/hr/sysaux01.dbf
+  11   0  Incr 1536263    01-APR-18              NO    /u01/app/oracle/oradata/o12201/hr/undotbs01.dbf
+  12   0  Incr 1536263    01-APR-18              NO    /u01/app/oracle/oradata/o12201/hr/users01.dbf
+
+
+List of Backup Sets
+===================
+
+
+BS Key  Size       Device Type Elapsed Time Completion Time
+------- ---------- ----------- ------------ ---------------
+4011    10.00K     DISK        00:00:00     01-APR-18      
+        BP Key: 4011   Status: AVAILABLE  Compressed: YES  Tag: 2018040100_LEV0_MONTHLY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df972259380_s4208_s1
+
+  List of Archived Logs in backup set 4011
+  Thrd Seq     Low SCN    Low Time  Next SCN   Next Time
+  ---- ------- ---------- --------- ---------- ---------
+  1    1635    1536177    28-MAR-18 1536308    01-APR-18
+recovery will be done up to SCN 1536308
+Media recovery start SCN is 1536226
+Recovery must be done beyond SCN 1536263 to clear datafile fuzziness
+Finished restore at 29-JUN-18
+</pre>
+
+We can also use preview to check whether the daily backup is recoverable.
+<pre class="prettyprint lang-sql linenums=1 ">
+RMAN> restore pluggable database "HR" preview;
+
+Starting restore at 29-JUN-18
+using channel ORA_DISK_1
+
+
+List of Backup Sets
+===================
+
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+5006    Incr 0  156.46M    DISK        00:00:27     22-JUN-18      
+        BP Key: 5006   Status: AVAILABLE  Compressed: YES  Tag: 2018062200_LEV0_DAILY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979430610_s5203_s1
+  List of Datafiles in backup set 5006
+  Container ID: 3, PDB Name: HR
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  9    0  Incr 1554221    22-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/system01.dbf
+  10   0  Incr 1554221    22-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/sysaux01.dbf
+  11   0  Incr 1554221    22-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/undotbs01.dbf
+  12   0  Incr 1554221    22-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/users01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+5018    Incr 1  64.00K     DISK        00:00:00     23-JUN-18      
+        BP Key: 5018   Status: AVAILABLE  Compressed: YES  Tag: 2018062300_LEV1_DAILY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979516807_s5215_s1
+  List of Datafiles in backup set 5018
+  Container ID: 3, PDB Name: HR
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  9    1  Incr 1554446    23-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/system01.dbf
+  10   1  Incr 1554446    23-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/sysaux01.dbf
+  11   1  Incr 1554446    23-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/undotbs01.dbf
+  12   1  Incr 1554446    23-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/users01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+5030    Incr 1  64.00K     DISK        00:00:01     24-JUN-18      
+        BP Key: 5030   Status: AVAILABLE  Compressed: YES  Tag: 2018062400_LEV1_DAILY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979603209_s5227_s1
+  List of Datafiles in backup set 5030
+  Container ID: 3, PDB Name: HR
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  9    1  Incr 1554665    24-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/system01.dbf
+  10   1  Incr 1554665    24-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/sysaux01.dbf
+  11   1  Incr 1554665    24-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/undotbs01.dbf
+  12   1  Incr 1554665    24-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/users01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+5042    Incr 1  64.00K     DISK        00:00:00     25-JUN-18      
+        BP Key: 5042   Status: AVAILABLE  Compressed: YES  Tag: 2018062500_LEV1_DAILY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979689608_s5239_s1
+  List of Datafiles in backup set 5042
+  Container ID: 3, PDB Name: HR
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  9    1  Incr 1554881    25-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/system01.dbf
+  10   1  Incr 1554881    25-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/sysaux01.dbf
+  11   1  Incr 1554881    25-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/undotbs01.dbf
+  12   1  Incr 1554881    25-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/users01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+5054    Incr 1  64.00K     DISK        00:00:01     26-JUN-18      
+        BP Key: 5054   Status: AVAILABLE  Compressed: YES  Tag: 2018062600_LEV1_DAILY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979776008_s5251_s1
+  List of Datafiles in backup set 5054
+  Container ID: 3, PDB Name: HR
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  9    1  Incr 1555091    26-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/system01.dbf
+  10   1  Incr 1555091    26-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/sysaux01.dbf
+  11   1  Incr 1555091    26-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/undotbs01.dbf
+  12   1  Incr 1555091    26-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/users01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+5066    Incr 1  64.00K     DISK        00:00:01     27-JUN-18      
+        BP Key: 5066   Status: AVAILABLE  Compressed: YES  Tag: 2018062700_LEV1_DAILY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979862407_s5263_s1
+  List of Datafiles in backup set 5066
+  Container ID: 3, PDB Name: HR
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  9    1  Incr 1555311    27-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/system01.dbf
+  10   1  Incr 1555311    27-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/sysaux01.dbf
+  11   1  Incr 1555311    27-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/undotbs01.dbf
+  12   1  Incr 1555311    27-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/users01.dbf
+
+BS Key  Type LV Size       Device Type Elapsed Time Completion Time
+------- ---- -- ---------- ----------- ------------ ---------------
+5078    Incr 1  64.00K     DISK        00:00:01     28-JUN-18      
+        BP Key: 5078   Status: AVAILABLE  Compressed: YES  Tag: 2018062800_LEV1_DAILY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979948807_s5275_s1
+  List of Datafiles in backup set 5078
+  Container ID: 3, PDB Name: HR
+  File LV Type Ckp SCN    Ckp Time  Abs Fuz SCN Sparse Name
+  ---- -- ---- ---------- --------- ----------- ------ ----
+  9    1  Incr 1555527    28-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/system01.dbf
+  10   1  Incr 1555527    28-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/sysaux01.dbf
+  11   1  Incr 1555527    28-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/undotbs01.dbf
+  12   1  Incr 1555527    28-JUN-18              NO    /u01/app/oracle/oradata/o12201/hr/users01.dbf
+
+
+List of Backup Sets
+===================
+
+
+BS Key  Size       Device Type Elapsed Time Completion Time
+------- ---------- ----------- ------------ ---------------
+5080    3.50K      DISK        00:00:00     28-JUN-18      
+        BP Key: 5080   Status: AVAILABLE  Compressed: YES  Tag: 2018062800_LEV1_DAILY
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979948811_s5277_s1
+
+  List of Archived Logs in backup set 5080
+  Thrd Seq     Low SCN    Low Time  Next SCN   Next Time
+  ---- ------- ---------- --------- ---------- ---------
+  1    2063    1555513    28-JUN-18 1555534    28-JUN-18
+
+BS Key  Size       Device Type Elapsed Time Completion Time
+------- ---------- ----------- ------------ ---------------
+5082    8.50K      DISK        00:00:00     28-JUN-18      
+        BP Key: 5082   Status: AVAILABLE  Compressed: YES  Tag: TAG20180628T060003
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979970403_s5279_s1
+
+  List of Archived Logs in backup set 5082
+  Thrd Seq     Low SCN    Low Time  Next SCN   Next Time
+  ---- ------- ---------- --------- ---------- ---------
+  1    2064    1555534    28-JUN-18 1555584    28-JUN-18
+
+BS Key  Size       Device Type Elapsed Time Completion Time
+------- ---------- ----------- ------------ ---------------
+5084    3.00K      DISK        00:00:00     28-JUN-18      
+        BP Key: 5084   Status: AVAILABLE  Compressed: YES  Tag: TAG20180628T120003
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df979992003_s5281_s1
+
+  List of Archived Logs in backup set 5084
+  Thrd Seq     Low SCN    Low Time  Next SCN   Next Time
+  ---- ------- ---------- --------- ---------- ---------
+  1    2065    1555584    28-JUN-18 1555631    28-JUN-18
+
+BS Key  Size       Device Type Elapsed Time Completion Time
+------- ---------- ----------- ------------ ---------------
+5086    3.50K      DISK        00:00:00     28-JUN-18      
+        BP Key: 5086   Status: AVAILABLE  Compressed: YES  Tag: TAG20180628T180006
+        Piece Name: /u01/app/oracle/backup/O12201/ora_df980013606_s5283_s1
+
+  List of Archived Logs in backup set 5086
+  Thrd Seq     Low SCN    Low Time  Next SCN   Next Time
+  ---- ------- ---------- --------- ---------- ---------
+  1    2066    1555631    28-JUN-18 1555677    28-JUN-18
+recovery will be done up to SCN 1555527
+Media recovery start SCN is 1555527
+Recovery must be done beyond SCN 1555527 to clear datafile fuzziness
+Finished restore at 29-JUN-18
+</pre>
