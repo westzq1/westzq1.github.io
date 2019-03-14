@@ -46,7 +46,7 @@ With this new feature, I can rewrite the code:
 
 <pre class="prettyprint lang-sql linenums=1 ">
 WITH
-    Function sleep (and in number) return number
+    Function sleep (n in number) return number
     is
     begin
         dbms_lock.sleep(n);
