@@ -59,7 +59,7 @@ p1gtxv_.arc
 ORA-00280: change 1914225 for thread 1 is in sequence #6
 
 
-Specify log: {<RET>=suggested | filename | AUTO | CANCEL}
+Specify log: {&lt;RET&gt;=suggested | filename | AUTO | CANCEL}
 auto
 ORA-00328: archived log ends at change 1814349, need later change 1914225
 ORA-00334: archived log:
@@ -109,9 +109,7 @@ Checkpoint cnt:300 scn: 0x00000000001d3571 03/14/2019 21:49:
 
 0x00000000001d3571 => 1914225, which is the error reported.
 
-SQL> alter database open resetlogs;
-
-After open the database, we can see the scn in archive log are increase a lot.
+After open the database resetlogs, we can see the scn in archive log are increase a lot.
 <pre class="prettyprint lang-sql linenums=1 ">
  SEQUENCE# FIRST_CHANGE# NEXT_CHANGE#
 ---------- ------------- ------------
@@ -166,7 +164,7 @@ p1gtxv_.arc
 ORA-00280: change 1814209 for thread 1 is in sequence #6
 
 
-Specify log: {<RET>=suggested | filename | AUTO | CANCEL}
+Specify log: {&lt;RET&gt;=suggested | filename | AUTO | CANCEL}
 auto
 ORA-00279: change 1814350 generated at 03/14/2019 21:54:34 needed for thread 1
 ORA-00289: suggestion :
@@ -221,7 +219,7 @@ okfwoq_.arc
 ORA-00280: change 1813573 for thread 1 is in sequence #1
 
 
-Specify log: {<RET>=suggested | filename | AUTO | CANCEL}
+Specify log: {&lt;RET&gt;=suggested | filename | AUTO | CANCEL}
 auto
 ORA-00279: change 1813666 generated at 03/14/2019 17:21:00 needed for thread 1
 ORA-00289: suggestion :
