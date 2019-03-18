@@ -1,6 +1,6 @@
 ---
 layout: post
-title: Oracle - Using archive log to rolling forward a database in a snapshot
+title: Oracle - Using archive log to roll forward a database in a snapshot
 modified: 2019-03-13
 categories: [Oracle]
 tags: 
