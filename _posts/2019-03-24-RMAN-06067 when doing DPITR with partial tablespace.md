@@ -1,0 +1,104 @@
+---
+layout: post
+title: Oracle - RMAN-06067 when doing DPITR with partial tablespace
+modified: 2019-03-24
+categories: [Oracle]
+tags: 
+  - Oracle.Recovery
+comments: true
+---
+
+I just want to restore SYSTEM/SYSAUX/UNDOTBS to a specific time in order to use flashback query on some dictionary table to determine the exact time of a mistake.
+
+When I tried to use a normal way to restore database, like:
+<pre class="prettyprint lang-sql linenums=1 ">
+RMAN> run{
+2> set dbid 766629926;
+3> restore controlfile from AUTOBACKUP;
+4> }
+
+RMAN> alter database mount;
+
+RMAN> run{
+2> set UNTIL sequence 66;
+3> restore tablespace SYSTEM,SYSAUX,UNDOTBS1;
+4> }
+</pre>
+
+When I do recover, RMAN-06067 reported. This is because this is a backup controlfile, and cannot just do RECOVER TABLESPACE on same specific tablespaces.
+<pre class="prettyprint lang-sql linenums=1 ">
+RMAN> run{
+2> set UNTIL sequence 66;
+3> recover tablespace SYSTEM,SYSAUX,UNDOTBS1;
+4> }
+
+executing command: SET until clause
+
+Starting recover at 22-MAR-19
+using channel ORA_DISK_1
+
+RMAN-00571: ===========================================================
+RMAN-00569: =============== ERROR MESSAGE STACK FOLLOWS ===============
+RMAN-00571: ===========================================================
+RMAN-03002: failure of recover command at 03/22/2019 12:40:29
+RMAN-06067: RECOVER DATABASE required with a backup or created control file
+</pre>
+
+We should use “recover database skip tablespace” to achieve this goal.
+<pre class="prettyprint lang-sql linenums=1 ">
+RMAN> run{
+2> set until sequence 66;
+3> recover database skip tablespace USERS,"PDB$SEED":SYSTEM,"PDB$SEED":SYSAUX,"PDB$SEED":UNDOTBS1,HR:SYSTEM,HR:SYSAUX,HR:UNDOTBS1;
+4> }
+
+executing command: SET until clause
+
+Starting recover at 22-MAR-19
+using channel ORA_DISK_1
+
+Executing: alter database datafile 7 offline
+Executing: alter database datafile 5 offline
+Executing: alter database datafile 6 offline
+Executing: alter database datafile 8 offline
+Executing: alter database datafile 9 offline
+Executing: alter database datafile 10 offline
+Executing: alter database datafile 11 offline
+starting media recovery
+
+archived log for thread 1 with sequence 57 is already on disk as file /home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_57_g99ypj0t_.arc
+archived log for thread 1 with sequence 58 is already on disk as file /home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_58_g99ypmxn_.arc
+archived log for thread 1 with sequence 59 is already on disk as file /home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_59_g99yppch_.arc
+archived log for thread 1 with sequence 60 is already on disk as file /home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_60_g99ypplv_.arc
+archived log for thread 1 with sequence 61 is already on disk as file /home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_61_g99ypsll_.arc
+archived log for thread 1 with sequence 62 is already on disk as file /home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_62_g99ypso9_.arc
+archived log for thread 1 with sequence 63 is already on disk as file /home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_63_g99ypwlg_.arc
+archived log for thread 1 with sequence 64 is already on disk as file /home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_64_g99ypwo2_.arc
+archived log for thread 1 with sequence 65 is already on disk as file /home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_65_g99ypzkh_.arc
+archived log file name=/home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_57_g99ypj0t_.arc thread=1 sequence=57
+archived log file name=/home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_58_g99ypmxn_.arc thread=1 sequence=58
+archived log file name=/home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_59_g99yppch_.arc thread=1 sequence=59
+archived log file name=/home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_60_g99ypplv_.arc thread=1 sequence=60
+archived log file name=/home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_61_g99ypsll_.arc thread=1 sequence=61
+archived log file name=/home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_62_g99ypso9_.arc thread=1 sequence=62
+archived log file name=/home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_63_g99ypwlg_.arc thread=1 sequence=63
+archived log file name=/home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_64_g99ypwo2_.arc thread=1 sequence=64
+archived log file name=/home/oracle/fast_recovery_area/O12201/O12201/archivelog/2019_03_22/o1_mf_1_65_g99ypzkh_.arc thread=1 sequence=65
+media recovery complete, elapsed time: 00:00:01
+Finished recover at 22-MAR-19
+
+RMAN> alter database open resetlogs;
+</pre>
+
+But the better way to do DPITR/TSPITR is to use DUPLICATE
+<pre class="prettyprint lang-sql linenums=1 ">
+run{
+set dbid 766629926;
+set until time "to_date('20190322 130700','yyyymmdd hh24miss')";
+duplicate database to O12201 
+tablespace SYSTEM,SYSAUX,UNDOTBS1
+BACKUP LOCATION '/home/oracle/fast_recovery_area/O12201/O12201/backupset/2019_03_22'
+;
+}
+</pre>
+
+
