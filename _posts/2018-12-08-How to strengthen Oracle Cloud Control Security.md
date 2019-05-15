@@ -16,14 +16,14 @@ EM 13c, 12c: How to Configure the Enterprise Manager Cloud Control Management Ag
 
 <span style="color:#ff0000;"><strong>Disable TLSv1.0 / TLSv1.1 / SSLv3
 </strong></span><br/>
-EM 12c can just support TLS v1.0
+EM 12c can just support TLS v1.0<br/>
 EM 13c: Enterprise Manager 13c Cloud Control Configuration with Specific Transport Layer Security Protocol:TLSv1.0,TLSv1.1,TLSv1.2 (Doc ID 2212006.1)<br/>
 EM 12c: Configure Enterprise Manager 12c Cloud Control to Accept Connections with TLSv1.0 Protocol (Doc ID 1602983.1)
 
 <span style="color:#ff0000;"><strong>Disable Weak Cipher Suites</strong></span><br/>
 
-13c: How to Disable Weak SSLCipherSuites in Enterprise Manager 13c Cloud Control (Doc ID 2138391.1)
-EM 12c: How to Disable Weak SSLCipherSuites Used by Enterprise Manager 12c Cloud Control (Doc ID 1477287.1)
+13c: How to Disable Weak SSLCipherSuites in Enterprise Manager 13c Cloud Control (Doc ID 2138391.1)<br/>
+EM 12c: How to Disable Weak SSLCipherSuites Used by Enterprise Manager 12c Cloud Control (Doc ID 1477287.1)<br/>
 How To Disable Anonymous and Weak Cipher Suites in Oracle WebLogic Server (Doc ID 1067411.1)
 
 <span style="color:#ff0000;"><strong>If you are using EM13.2, JDK should be upgraded in advance to at least 1.7_131</strong></span><br/>
