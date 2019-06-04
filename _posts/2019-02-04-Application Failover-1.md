@@ -505,7 +505,7 @@ INSTANCE_NUMBER
 	      1
 </pre>
 
-In 12c, -f is working very similar to drian-out, no error will be reported. That makes swithover more graceful.<br/>
+In 12c, -f is working very similar to drain-out, no error will be reported. That makes swithover more graceful.<br/>
 <pre class="prettyprint lang-sql linenums=1 ">
 INSTANCE_NUMBER
 ---------------
