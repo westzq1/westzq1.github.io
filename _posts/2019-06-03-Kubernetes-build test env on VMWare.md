@@ -1,7 +1,7 @@
 ---
 layout: post
 title: Kubernetes - create a test cluster
-modified: 2019-05-16
+modified: 2019-06-03
 categories: [k8s]
 tags: 
   - testing
