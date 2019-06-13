@@ -37,7 +37,7 @@ exec :cap_rpt := dbms_workload_capture.report(capture_id=>:cap_id, format=> dbms
 select :cap_rpt from dual;
 </pre>
 This report is very similar with an ASH report plus some metadata of capture:<br/>
-<img src="images/20190222.1.png" width="600"/>
+<img src="{{site.baseurl}}/images/20190222.1.png" width="600"/>
 
 Export AWR, it is needed when we run workload analyzer on the replay side. The dmp file is on the capture directory.
 <pre class="prettyprint lang-sql linenums=1 ">
@@ -98,7 +98,7 @@ The output is on the CAPTURE folder, it shows the potential impact of increasing
 In my case:
 1. A significant part of our workload comes from PL/SQL, it is very hard to synchronize the commit inside if we are using synchronized mode to replay. We need to consider to turn off synchronization mode.
 2. Many captured sessions had been connected when I turn the capture on, if the connection is not stateless, we may encounter many divergences
-<img src="images/20190222.2.png" width="600" />
+<img src="{{site.baseurl}}/images/20190222.2.png" width="600" />
 
 After preprocessing, we can start to run replay. It is recommended to do SPA before Database Replay, but this time, we are doing physical migration without database upgrade, so I skipped this step. 
 <pre class="prettyprint lang-sql linenums=1 ">
@@ -305,7 +305,7 @@ set linesize 170 pagesize 999
 set long 30000000 longchunksize 1000 serverout on
 select dbms_workload_replay.report(replay_id => 53,format => 'HTML') from dual;
 </pre>
-<img src="images/20190222.3.png" width="600" />
+<img src="{{site.baseurl}}/images/20190222.3.png" width="600" />
 
 And also, we need to export the AWR of this replay, it is needed to do compare with the other replays.
 <pre class="prettyprint lang-sql linenums=1 ">

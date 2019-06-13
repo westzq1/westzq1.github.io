@@ -98,7 +98,7 @@ dd358d28ae29        selenium/node-chrome-debug   "/opt/bin/entry_poin"   2 minu
 </pre>
 
 You can check the status of the grid by the web interface.
-<img src="images/20190515.1.png" width="600"/>
+<img src="{{site.baseurl}}/images/20190515.1.png" width="600"/>
 
 Then, write a python script to call the selenium testing python scripts.
 <pre class="prettyprint lang-python linenums=1 ">

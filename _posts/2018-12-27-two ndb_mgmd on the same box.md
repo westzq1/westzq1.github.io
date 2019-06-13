@@ -33,7 +33,7 @@ We have to do the following things:
 5. The data node / sql node information in [ndbd] and [mysqld]
 
 For my configuration
-<img src="/images/20181227.1.png" />
+<img src="{{site.baseurl}}/images/20181227.1.png" />
 
 Then, start the Primary Cluster
 <pre class="prettyprint lang-sh linenums=1 ">/usr/local/mysql/bin/ndb_mgmd -f /var/lib/mysql-cluster/config.ini</pre>

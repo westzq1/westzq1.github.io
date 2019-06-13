@@ -172,7 +172,7 @@ server {
 </pre>
 
 First access:<br/>
-<img src="images/20190613.1.png" width="400"/>
+<img src="{{site.baseurl}}/images/20190613.1.png" width="400"/>
 
-Refresh:<br/>
-<img src="images/20190613.2.png" width="400"/>
+Refresh, then, you can see that session is on the another node, with the same session id<br/>
+<img src="{{site.baseurl}}/images/20190613.2.png" width="400"/>
