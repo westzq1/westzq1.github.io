@@ -176,3 +176,4 @@ First access:<br/>
 
 Refresh, then, you can see that session is on the another node, with the same session id<br/>
 <img src="{{site.baseurl}}/images/20190613.2.png" width="400"/>
+
