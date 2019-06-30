@@ -30,7 +30,7 @@ ping_target=8.8.8.8
 
 First, set up the environment, including hostname, disable firewall, SELinux, etc.
 
-<pre class="prettyprint lang-sql linenums=1 ">
+<pre class="prettyprint lang-sh linenums=1 ">
 # k8s_env.yml
 ---
 - hosts: all
