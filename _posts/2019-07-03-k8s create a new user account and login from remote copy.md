@@ -1,0 +1,160 @@
+---
+layout: post
+title: K8S - Create a New User Account and Login from Remote
+modified: 2019-07-03
+categories: [k8s]
+tags: 
+  - testing
+comments: true
+---
+
+I want to create a user zhangqiaoc and assign it as the administrator for the namespace ns_zhangqiaoc
+
+<span style="color:#ff0000;"><strong>On the master node</strong></span><br/>
+1.create a key for zhangqiaoc and use cluster ca to sign it.
+<pre class="prettyprint lang-sql linenums=1 ">
+# openssl genrsa -out zhangqiaoc.key 2048
+# openssl req -new -key zhangqiaoc.key -out zhangqiaoc.csr -subj "/CN=zhangqiaoc/O=management"
+# openssl x509 -req -in zhangqiaoc.csr -CA /etc/kubernetes/pki/ca.crt  -CAkey /etc/kubernetes/pki/ca.key -CAcreateserial -out zhangqiaoc.crt -days 3650
+</pre>
+
+2.create a namespace
+<pre class="prettyprint lang-sql linenums=1 ">
+# kubectl create namespace ns-zhangqiaoc
+</pre>
+
+3.bind clusterRole admin with user zhangqiaoc
+<pre class="prettyprint lang-sql linenums=1 ">
+# kubectl create -f rolebinding.yml
+
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: admin-binding
+  namespace: ns-zhangqiaoc         # <-- in namespace ns-zhangqiaoc
+subjects:
+- kind: User
+  name: zhangqiaoc
+  apiGroup: ""
+roleRef:
+  kind: ClusterRole
+  name: admin                      # <-- as the administrator
+  apiGroup: ""
+</pre>
+
+4.copy the certificate and key of the user zhangqiaoc and ca certificate to the remote.
+<pre class="prettyprint lang-sql linenums=1 ">
+scp /root/zhangqiaoc.crt 83.16.16.73:/root
+scp /root/zhangqiaoc.key 83.16.16.73:/root
+scp /etc/kubernetes/pki/ca.crt 83.16.16.73:/root
+</pre>
+
+<span style="color:#ff0000;"><strong>On the kubectl client node</strong></span><br/>
+5.setup kubectl on the remote / client
+<pre class="prettyprint lang-sql linenums=1 ">
+# kubectl config set-cluster kubernetes --server=https://83.16.16.71:6443 --certificate-authority=/root/ca.crt
+# kubectl config set-credentials zhangqiaoc --client-certificate=/root/zhangqiaoc.crt --client-key=/root/zhangqiaoc.key 
+# kubectl config set-context zhangqiaoc@kubernetes --cluster=kubernetes --namespace=ns-zhangqiaoc --user=zhangqiaoc
+# kubectl config use-context zhangqiaoc@kubernetes
+</pre>
+
+6.Test
+<pre class="prettyprint lang-sql linenums=1 ">
+[root@k8s3 ~]# kubectl get pods
+No resources found.
+[root@k8s3 ~]# kubectl run mysql-client --image=mysql:latest --port=3306 --env="MYSQL_ALLOW_EMPTY_PASSWORD=1"
+kubectl run --generator=deployment/apps.v1 is DEPRECATED and will be removed in a future version. Use kubectl run --generator=run-pod/v1 or kubectl create instead.
+deployment.apps/mysql-client created
+
+# kubectl config view
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority: /root/ca.crt
+    server: https://83.16.16.71:6443
+  name: kubernetes
+contexts:
+- context:
+    cluster: kubernetes
+    namespace: ns-zhangqiaoc
+    user: zhangqiaoc
+  name: zhangqiaoc@kubernetes
+current-context: zhangqiaoc@kubernetes
+kind: Config
+preferences: {}
+users:
+- name: zhangqiaoc
+  user:
+    client-certificate: /root/zhangqiaoc.crt
+    client-key: /root/zhangqiaoc.key
+</pre>
+
+We can also replace the certificate files to the certificate strings 
+<pre class="prettyprint lang-sql linenums=1 ">
+[root@k8s3 ~]# cat zhangqiaoc.crt |base64 --wrap=0
+LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUN1ekNDQWFNQ0NRRFFKVlNyT0lMWkp6QU5CZ2txaGtpRzl3MEJBUXNGQURBVk1STXdFUVlEVlFRREV3cHIKZFdKbGNtNWxkR1Z6TUI0WERURTVNRGN3TkRFMU5URXdNRm9YRFRJNU1EY3dNVEUxTlRFd01Gb3dLakVUTUJFRwpBMVVFQXd3S2VtaGhibWR4YVdGdll6RVRNQkVHQTFVRUNnd0tiV0Z1WVdkbGJXVnVkRENDQVNJd0RRWUpLb1pJCmh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBTU83WWQrNlhvZVpla2F4VXRHUkhTdXpieG1pUTYzY3dWY0EKdC9IeUJ1U0dvTFBHR0thUCtsQ3dBaWxCeXZySUFCQzdrR0IzODFTS1FaVkIxZVpyZFFtTWRkSko1Zit5OGkrUQppR3dReitvaHFiZnB4ZnlaZVJiTTdVR2V1OTN5Vm1YcC9XUkYzbnJiNjRlZ1FKWW1xNU9hSGxKUkxRM1ZZeE5ECnFTalNFWFl6YXlaR3BucXpmeTJmNVM3dDJpUmpUdzB2ZkNtd3I5RXhaSlBkWFZtQjZudTJ6RStHQmlBRkZpd1EKc2hKV2V6aGc2SlZVWTJNT3IzdFJ2V1Rpa3hRb3FhWitING9iVzdpeXVSbDFFblJMMk9jNGlGTnRYSzRNeEZvZgozYitacXA5dnNxWm42SGpqelYxQkhVN0lHUEZvVmVtYXo2VU9sLy83Zm9WSDJMRE45cU1DQXdFQUFUQU5CZ2txCmhraUc5dzBCQVFzRkFBT0NBUUVBQ1hnODFsa3lVS3pVOTl5bUJ6RHZNUFR4ZFZXaDRuTzZhclZoN0lpU0RUdHAKVWdMKzRkRkR2Z29CQnlhTWVCN2lVQUNVc1cyakVvWHduN2JJcCtTeGVVWTFsbkJGbDBNOGFEVnp3MDg2ZzllWApQV3pydjV1eEhLSy8xV0FiT1ZISkRGMDJibU1oU08wVTZSQ2RoL2V3SzluQjVsNkE5OUxIUkxPc0JuUElId1JuCkJ1YTM1cDJRbnRNQUxaZUhicExSd3FGWUU1VG8yT25CMndTamlSbit6YkM2ZVdhY1FGSk5WZC9za3gvZHQ5UVUKWnU2bHQrUGJvL2htUmlrREswV2FNYjU5QzI3UkIxa2hNM1pma3AxRmRrWGtscDBxSHQ2QlBDb1V6dHU2dXo5dwppZm1heEExTWJFQTZLQm9UTlRWUHpvQ1IzSUhkUk9BYTVMd0dNOERXUWc9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+[root@k8s3 ~]# cat zhangqiaoc.key |base64 --wrap=0
+LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb2dJQkFBS0NBUUVBdzd0aDM3cGVoNWw2UnJGUzBaRWRLN052R2FKRHJkekJWd0MzOGZJRzVJYWdzOFlZCnBvLzZVTEFDS1VISytzZ0FFTHVRWUhmelZJcEJsVUhWNW10MUNZeDEwa25sLzdMeUw1Q0liQkRQNmlHcHQrbkYKL0psNUZzenRRWjY3M2ZKV1plbjlaRVhlZXR2cmg2QkFsaWFyazVvZVVsRXREZFZqRTBPcEtOSVJkak5ySmthbQplck4vTFovbEx1M2FKR05QRFM5OEtiQ3YwVEZrazkxZFdZSHFlN2JNVDRZR0lBVVdMQkN5RWxaN09HRG9sVlJqCll3NnZlMUc5Wk9LVEZDaXBwbjRmaWh0YnVMSzVHWFVTZEV2WTV6aUlVMjFjcmd6RVdoL2R2NW1xbjIreXBtZm8KZU9QTlhVRWRUc2dZOFdoVjZaclBwUTZYLy90K2hVZllzTTMyb3dJREFRQUJBb0lCQURsVzZKcEJIN1k3dVAyQwpydzlqb3BjTnpzdEVwTzBIRWNDcUhqa0x2UWN2aFY2RTl1MjhtZ2tQTnVMZE9saHpSTW1pR082WjFUZjc5TENFCkErU25zRGFtNWxFL2d0aUFsTUJvWi82NGdpQkYwbEZsYzdISFNCanMyY2h5ZHZqVEtJcGNuUFhHSGlJQjBTTC8KU0V4MGNha2c2aWNWVHN5UnFaK1lIN01zcng3ZjkxcS9vOEtTdzc4QkZDODArQmtva1Z6ZGxOVVBYbENDd0tkYgo2ODhHVUxXbm1MNGQ1cGFVeDhBbDZZL21xRFVZMFZtSHVoNldNby96OWVPZ1M1ZXBQVkx3cXpqRkVqYmd6R21DCk0wbnlDblIrSVRwMU1Odzg0OWt4NWFPd0MyZXcvcEVmWFR3Qy9DSmNReDB0NUUyZEFjTnBHSGRZTFJSUFBYeEYKbFNoY1ZRa0NnWUVBK2h2dFpVanJTMGR2SnpvTUkwdXNhK01mNlZTNWQvTGhwbHhBNkxKMlhnZ1h3SVJnZWZZagpJNkp2c0tub1hRbGsyaHNpWENsVjdURTZCSEQ0c3pMSG9KeEk1Z3ZETFFxU3Q1bm90N0pmNGJ3RVgwZHd5RzFCCnJnS3NLTXhVR0d1ckVlM0RHb3ptQWhjYmQvK2lBeTR6Q2o4TDVScjR1M3B4Y2l4enZYaWZvL2NDZ1lFQXlGZVUKVkxuWlN1NGM5eE5qVGJnb082U2tMQWdFM2daOGJGVGJ2SnFKUUljeENQaDE0Q2xia0FwRVRFRWE3T3JtbFRNZgp3SDlqUmNMTWREaXN1TVd6S09maTN4aW52eWV3OFYrUXFnTlZocEd4MHUyR3NGREZVMmtLL3phSVptZEpFajdnCjJ5aFRMdWE1TlFSMi9VMGF4T2d3cFcvRXo4RW14QXNHQ1ZwRS83VUNnWUJlNFlWWHJTZ0Y4TjJNQmd0Z3dHNXkKcDBFTjVXUk95c2NyczBlMGZ5OUVVTkdoNlJZb2JtVzZPUDhpQi9Mc2lJbkg3QTlHNHkrRHdlNytqRlRzdGxEZwo3eWtBakduSWhvQk9Rb2IwV1NqaW04OFV6aWROQVpXdkM3aC82YlBsWjhNSUZDaTF3OG5sOVJvb2xjUENiUjVUCnZzTW1jT3IzUkdZUktDZm9Nd0JzMVFLQmdCVHN1TXhrb09Kbm5sVGNESW9vaXVNMzNnSFBVSnJUK0pqa0FCTmgKM0tZRnVNUmtGd096cmlHTVFQZnA4T0wvNGRlQmdIWjlsNlBJcGN3WncwaUZOYUkzSGdZSk1EUVI5RFF4dEExZAp6Y2dCWFo1WE9yTWRySTU2c1RCWXhNUlZVMWQ1ZzhqQUhIZ1FseFdIZ3RvUC9KVEdYNVpYNXlsLzFnbXgwUTZYCkJBL2xBb0dBSCtya3FnU2VhOXhCY2NJRnlobjlmWjdBSW5sSE05aTNvNk8wUTNBK1NLZFZKUzN4cjVpbUVYZFoKWlhvQXBBTGs3M1NnQjVhWXVsMWl6ZWJjSHJ0QnM5TThkZUVWNmpUSXcxSzNWc29mWlZJSmt0MWQ0WG8rNnc5egpiZ0g2eEF1OEErY1BCdmgzSUF4cGdwSDhPM0Q5aUdwOVVJejJ6dEFmR0VYVmtZc3E4MEU9Ci0tLS0tRU5EIFJTQSBQUklWQVRFIEtFWS0tLS0tCg==
+
+[root@k8s3 ~]# vi ~/.kube/config 
+...
+users:
+- name: zhangqiaoc
+  user:
+    client-certificate-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUN1ekNDQWFNQ0NRRFFKVlNyT0lMWkp6QU5CZ2txaGtpRzl3MEJBUXNGQURBVk1STXdFUVlEVlFRREV3cHIKZFdKbGNtNWxkR1Z6TUI0WERURTVNRGN3TkRFMU5URXdNRm9YRFRJNU1EY3dNVEUxTlRFd01Gb3dLakVUTUJFRwpBMVVFQXd3S2VtaGhibWR4YVdGdll6RVRNQkVHQTFVRUNnd0tiV0Z1WVdkbGJXVnVkRENDQVNJd0RRWUpLb1pJCmh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBTU83WWQrNlhvZVpla2F4VXRHUkhTdXpieG1pUTYzY3dWY0EKdC9IeUJ1U0dvTFBHR0thUCtsQ3dBaWxCeXZySUFCQzdrR0IzODFTS1FaVkIxZVpyZFFtTWRkSko1Zit5OGkrUQppR3dReitvaHFiZnB4ZnlaZVJiTTdVR2V1OTN5Vm1YcC9XUkYzbnJiNjRlZ1FKWW1xNU9hSGxKUkxRM1ZZeE5ECnFTalNFWFl6YXlaR3BucXpmeTJmNVM3dDJpUmpUdzB2ZkNtd3I5RXhaSlBkWFZtQjZudTJ6RStHQmlBRkZpd1EKc2hKV2V6aGc2SlZVWTJNT3IzdFJ2V1Rpa3hRb3FhWitING9iVzdpeXVSbDFFblJMMk9jNGlGTnRYSzRNeEZvZgozYitacXA5dnNxWm42SGpqelYxQkhVN0lHUEZvVmVtYXo2VU9sLy83Zm9WSDJMRE45cU1DQXdFQUFUQU5CZ2txCmhraUc5dzBCQVFzRkFBT0NBUUVBQ1hnODFsa3lVS3pVOTl5bUJ6RHZNUFR4ZFZXaDRuTzZhclZoN0lpU0RUdHAKVWdMKzRkRkR2Z29CQnlhTWVCN2lVQUNVc1cyakVvWHduN2JJcCtTeGVVWTFsbkJGbDBNOGFEVnp3MDg2ZzllWApQV3pydjV1eEhLSy8xV0FiT1ZISkRGMDJibU1oU08wVTZSQ2RoL2V3SzluQjVsNkE5OUxIUkxPc0JuUElId1JuCkJ1YTM1cDJRbnRNQUxaZUhicExSd3FGWUU1VG8yT25CMndTamlSbit6YkM2ZVdhY1FGSk5WZC9za3gvZHQ5UVUKWnU2bHQrUGJvL2htUmlrREswV2FNYjU5QzI3UkIxa2hNM1pma3AxRmRrWGtscDBxSHQ2QlBDb1V6dHU2dXo5dwppZm1heEExTWJFQTZLQm9UTlRWUHpvQ1IzSUhkUk9BYTVMd0dNOERXUWc9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+
+    client-key-data: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb2dJQkFBS0NBUUVBdzd0aDM3cGVoNWw2UnJGUzBaRWRLN052R2FKRHJkekJWd0MzOGZJRzVJYWdzOFlZCnBvLzZVTEFDS1VISytzZ0FFTHVRWUhmelZJcEJsVUhWNW10MUNZeDEwa25sLzdMeUw1Q0liQkRQNmlHcHQrbkYKL0psNUZzenRRWjY3M2ZKV1plbjlaRVhlZXR2cmg2QkFsaWFyazVvZVVsRXREZFZqRTBPcEtOSVJkak5ySmthbQplck4vTFovbEx1M2FKR05QRFM5OEtiQ3YwVEZrazkxZFdZSHFlN2JNVDRZR0lBVVdMQkN5RWxaN09HRG9sVlJqCll3NnZlMUc5Wk9LVEZDaXBwbjRmaWh0YnVMSzVHWFVTZEV2WTV6aUlVMjFjcmd6RVdoL2R2NW1xbjIreXBtZm8KZU9QTlhVRWRUc2dZOFdoVjZaclBwUTZYLy90K2hVZllzTTMyb3dJREFRQUJBb0lCQURsVzZKcEJIN1k3dVAyQwpydzlqb3BjTnpzdEVwTzBIRWNDcUhqa0x2UWN2aFY2RTl1MjhtZ2tQTnVMZE9saHpSTW1pR082WjFUZjc5TENFCkErU25zRGFtNWxFL2d0aUFsTUJvWi82NGdpQkYwbEZsYzdISFNCanMyY2h5ZHZqVEtJcGNuUFhHSGlJQjBTTC8KU0V4MGNha2c2aWNWVHN5UnFaK1lIN01zcng3ZjkxcS9vOEtTdzc4QkZDODArQmtva1Z6ZGxOVVBYbENDd0tkYgo2ODhHVUxXbm1MNGQ1cGFVeDhBbDZZL21xRFVZMFZtSHVoNldNby96OWVPZ1M1ZXBQVkx3cXpqRkVqYmd6R21DCk0wbnlDblIrSVRwMU1Odzg0OWt4NWFPd0MyZXcvcEVmWFR3Qy9DSmNReDB0NUUyZEFjTnBHSGRZTFJSUFBYeEYKbFNoY1ZRa0NnWUVBK2h2dFpVanJTMGR2SnpvTUkwdXNhK01mNlZTNWQvTGhwbHhBNkxKMlhnZ1h3SVJnZWZZagpJNkp2c0tub1hRbGsyaHNpWENsVjdURTZCSEQ0c3pMSG9KeEk1Z3ZETFFxU3Q1bm90N0pmNGJ3RVgwZHd5RzFCCnJnS3NLTXhVR0d1ckVlM0RHb3ptQWhjYmQvK2lBeTR6Q2o4TDVScjR1M3B4Y2l4enZYaWZvL2NDZ1lFQXlGZVUKVkxuWlN1NGM5eE5qVGJnb082U2tMQWdFM2daOGJGVGJ2SnFKUUljeENQaDE0Q2xia0FwRVRFRWE3T3JtbFRNZgp3SDlqUmNMTWREaXN1TVd6S09maTN4aW52eWV3OFYrUXFnTlZocEd4MHUyR3NGREZVMmtLL3phSVptZEpFajdnCjJ5aFRMdWE1TlFSMi9VMGF4T2d3cFcvRXo4RW14QXNHQ1ZwRS83VUNnWUJlNFlWWHJTZ0Y4TjJNQmd0Z3dHNXkKcDBFTjVXUk95c2NyczBlMGZ5OUVVTkdoNlJZb2JtVzZPUDhpQi9Mc2lJbkg3QTlHNHkrRHdlNytqRlRzdGxEZwo3eWtBakduSWhvQk9Rb2IwV1NqaW04OFV6aWROQVpXdkM3aC82YlBsWjhNSUZDaTF3OG5sOVJvb2xjUENiUjVUCnZzTW1jT3IzUkdZUktDZm9Nd0JzMVFLQmdCVHN1TXhrb09Kbm5sVGNESW9vaXVNMzNnSFBVSnJUK0pqa0FCTmgKM0tZRnVNUmtGd096cmlHTVFQZnA4T0wvNGRlQmdIWjlsNlBJcGN3WncwaUZOYUkzSGdZSk1EUVI5RFF4dEExZAp6Y2dCWFo1WE9yTWRySTU2c1RCWXhNUlZVMWQ1ZzhqQUhIZ1FseFdIZ3RvUC9KVEdYNVpYNXlsLzFnbXgwUTZYCkJBL2xBb0dBSCtya3FnU2VhOXhCY2NJRnlobjlmWjdBSW5sSE05aTNvNk8wUTNBK1NLZFZKUzN4cjVpbUVYZFoKWlhvQXBBTGs3M1NnQjVhWXVsMWl6ZWJjSHJ0QnM5TThkZUVWNmpUSXcxSzNWc29mWlZJSmt0MWQ0WG8rNnc5egpiZ0g2eEF1OEErY1BCdmgzSUF4cGdwSDhPM0Q5aUdwOVVJejJ6dEFmR0VYVmtZc3E4MEU9Ci0tLS0tRU5EIFJTQSBQUklWQVRFIEtFWS0tLS0tCg==
+    
+[root@k8s3 ~]# kubectl config view
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority: /root/ca.crt
+    server: https://83.16.16.71:6443
+  name: kubernetes
+contexts:
+- context:
+    cluster: kubernetes
+    namespace: ns-zhangqiaoc
+    user: zhangqiaoc
+  name: zhangqiaoc@kubernetes
+current-context: zhangqiaoc@kubernetes
+kind: Config
+preferences: {}
+users:
+- name: zhangqiaoc
+  user:
+    client-certificate-data: REDACTED
+    client-key-data: REDACTED
+</pre>
+    
+<span style="color:#ff0000;"><strong>On the master </strong></span><br/>
+7.Verify
+<pre class="prettyprint lang-sql linenums=1 ">
+[root@k8s1 ~]# kubectl get pods -A
+NAMESPACE       NAME                                          READY   STATUS    RESTARTS   AGE
+default         mysql-0                                       2/2     Running   0          2d13h
+default         mysql-1                                       2/2     Running   0          2d13h
+default         mysql-2                                       2/2     Running   0          2d13h
+default         mysql-client-649f4f447-79c4r                  1/1     Running   0          20h
+default         nfs-provisioner-78fc579c97-9snrn              1/1     Running   0          2d13h
+default         nfs-server-7b548776cd-xtcl2                   1/1     Running   0          2d13h
+default         ping-7dc8575788-h4qf4                         1/1     Running   0          23h
+kube-system     calico-kube-controllers-8464b48649-w4lvz      1/1     Running   0          2d13h
+kube-system     calico-node-bbwwk                             1/1     Running   0          2d13h
+kube-system     calico-node-dprm2                             1/1     Running   0          2d13h
+kube-system     calico-node-kcmrw                             1/1     Running   0          2d13h
+kube-system     calico-node-lhsds                             1/1     Running   0          2d13h
+kube-system     coredns-fb8b8dccf-4p8jh                       1/1     Running   0          21h
+kube-system     coredns-fb8b8dccf-d2v8p                       1/1     Running   0          21h
+kube-system     etcd-k8s1.zhangqiaoc.com                      1/1     Running   0          2d13h
+kube-system     kube-apiserver-k8s1.zhangqiaoc.com            1/1     Running   0          2d13h
+kube-system     kube-controller-manager-k8s1.zhangqiaoc.com   1/1     Running   7          2d13h
+kube-system     kube-proxy-m2wbv                              1/1     Running   0          2d13h
+kube-system     kube-proxy-ns78p                              1/1     Running   0          2d13h
+kube-system     kube-proxy-x2qdc                              1/1     Running   0          2d13h
+kube-system     kube-proxy-xwhfh                              1/1     Running   0          2d13h
+kube-system     kube-scheduler-k8s1.zhangqiaoc.com            1/1     Running   9          2d13h
+ns-zhangqiaoc   mysql-client-649f4f447-pdknr                  1/1     Running   0          63s    <- it is here in ns-zhangqiaoc namespace
+</pre>
+

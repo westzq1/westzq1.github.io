@@ -1,8 +1,8 @@
 ---
 layout: post
-title: Deploy NFS Server on K8S 
+title: K8S - Deploy NFS Server on K8S 
 modified: 2019-06-28
-categories: [docker]
+categories: [K8S]
 tags: 
   - testing
 comments: true
@@ -10,8 +10,9 @@ comments: true
 
 I want to test statefulset of k8s, a cluster storage is needed. <br/>
 NFS is the easist solution. We can deploy a NFS server on K8S. <br/>
-Due to it is stateless, we should fix NFS Server on a specific server.
+Due to the stateless of K8S, we should fix NFS Server on a specific server.
 
+<pre class="prettyprint lang-sql linenums=1 ">
 # kubectl create -f nfs-server.yml
 
 apiVersion: extensions/v1beta1
@@ -19,13 +20,13 @@ kind: Deployment
 metadata:
   name: nfs-server
 spec:
-  replicas: 1  # no more replicas
+  replicas: 1           # <- no more replicas
   template:
     metadata:
       labels:
         app: nfs-server
     spec:
-      nodeSelector:  # use selector to fix nfs-server on k8s2.zhangqiaoc.com
+      nodeSelector:     # <- use selector to fix nfs-server on k8s2.zhangqiaoc.com
         kubernetes.io/hostname: k8s2.zhangqiaoc.com
       containers:
       - name: nfs-server
@@ -38,30 +39,35 @@ spec:
           value: "/nfsshare"
         ports:
         - name: nfs  
-          containerPort: 2049  # export port
+          containerPort: 2049   # <- export port
         securityContext:
-          privileged: true  # privileged mode is mandentory.
+          privileged: true      # <- privileged mode is mandentory.
       volumes:
       - name: nfs-storage  
-        hostPath:  # the folder on the host machine.
+        hostPath:               # <- the folder on the host machine.
           path: /root/fileshare
+</pre>
 
-create a service to expose the nfs to the other pods          
+create a service to expose the nfs to the other pods  
+<pre class="prettyprint lang-sql linenums=1 ">     
 # kubectl expose deployment nfs-server --type=ClusterIP
 
 # kubectl get svc
 NAME         TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
-kubernetes   ClusterIP   10.96.0.1       <none>        443/TCP    9d
-nfs-server   ClusterIP   10.101.117.226   <none>       2049/TCP   14s
+kubernetes   ClusterIP   10.96.0.1       &lt;none&gt;        443/TCP    9d
+nfs-server   ClusterIP   10.101.117.226   &lt;none&gt;       2049/TCP   14s
+</pre>   
 
 Testing:
+<pre class="prettyprint lang-sql linenums=1 ">     
 # yum install -y nfs-utils
 # mkdir /root/nfsmnt
 # mount -v 10.101.117.226:/ /root/nfsmnt
+</pre>   
 
 Create a PV and PVC for testing
-
-# kubectl create -f pv.yaml 
+<pre class="prettyprint lang-sql linenums=1 ">     
+# kubectl create -f pv.yml 
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -80,7 +86,7 @@ spec:
 NAME    CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM   STORAGECLASS   REASON   AGE
 mypv1   20Gi       RWO            Recycle          Available                                   35s
    
-# kubectl create -f pvc.yaml    
+# kubectl create -f pvc.yml    
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
@@ -95,19 +101,24 @@ spec:
 # kubectl get PersistentVolumeClaim
 NAME     STATUS   VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
 mypvc1   Bound    mypv1    20Gi       RWO                           13s
+</pre>   
 
-In order to use statefulset, we have to have a storage class. And the storage class needs a provisioner
+In order to use statefulset, we have to have a storage class. And the storage class needs a provisioner<br/>
 
 create a service account named nfs-provisioner
-# kubectl create -f serviceaccount.yaml 
+<pre class="prettyprint lang-sql linenums=1 ">
+# kubectl create -f serviceaccount.yml 
+
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: nfs-provisioner
+</pre>
 
-For rbac, we should create a clusterrole named nfs-provisioner-runner 
-and a role, named leader-locking-nfs-provisioner  
-# kubectl create -f rbac.yaml 
+For rbac, we should create a clusterrole named nfs-provisioner-runner and a role, named leader-locking-nfs-provisioner  
+<pre class="prettyprint lang-sql linenums=1 ">
+# kubectl create -f rbac.yml 
+
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
@@ -161,9 +172,11 @@ roleRef:
   kind: Role
   name: leader-locking-nfs-provisioner
   apiGroup: rbac.authorization.k8s.io
-
+</pre>
 Then, we can deploy nfs client provisioner  
+<pre class="prettyprint lang-sql linenums=1 ">
 # kubectl create -f deployment.yaml 
+
 # https://github.com/kubernetes-incubator/external-storage/tree/master/nfs-client
 kind: Deployment
 apiVersion: extensions/v1beta1
@@ -206,9 +219,12 @@ apiVersion: storage.k8s.io/v1
 metadata:
   name: nfs
 provisioner: zhangqiaoc.com/nfs
+</pre>
 
 For testing 
-# kubectl create -f test-claim.yaml 
+<pre class="prettyprint lang-sql linenums=1 ">
+# kubectl create -f test-claim.yml
+ 
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
@@ -221,24 +237,10 @@ spec:
       storage: 1Mi
   storageClassName: nfs
   
-
 # kubectl get pvc
 NAME          STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
 test-claim1   Bound    pvc-25c3b950-8ff1-11e9-9a33-000c29d8a18d   1Mi        RWX            nfs            16s
-
-
-----------------------------------------------------------------------------------------------------------
-
-# kubectl create -f  mysql-configmap.yaml 
-# kubectl create -f  mysql-services.yaml 
-# kubectl create -f  mysql-statefulset.yaml 
-statefulset.apps/mysql created
-
-
-kubectl run mysql-client --image=mysql:latest --port=3306 --env="MYSQL_ALLOW_EMPTY_PASSWORD=1"
-
-kubectl exec mysql-client-649f4f447-ssr7q -it bash
-
+</pre>
 
 
 
