@@ -9,11 +9,11 @@ comments: true
 ---
 Update July 26 <br/>
 
-Get feedback from Oracle, Using _JAVA_OPTIONS could change the position of tmp folder OPatch uses.<br>
+Get feedback from Oracle, Using _JAVA_OPTIONS could change the position of tmp folder OPatch uses.<br/>
  
 <pre class="prettyprint lang-sql linenums=1 ">export _JAVA_OPTIONS="-Djava.io.tmpdir=&lt;local path&gt;" </pre>
 
-=============================================================================
+=============================================================================<br/>
 When I do Oracle database July 2019 PSU patching on the machines which /tmp folder is mounted with noexec option, error “opatch: Permission denied” reported.
 <pre class="prettyprint lang-sql linenums=1 ">
 $ORACLE_HOME/OPatch/opatch apply 29494060/
