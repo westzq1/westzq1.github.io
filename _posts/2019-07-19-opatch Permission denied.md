@@ -2,7 +2,7 @@
 layout: post
 title: opatch&#58; Permission denied reported during 2019 July PSU Patching
 modified: 2019-07-19
-categories: [Oracle]
+categories: [Oracle]  
 tags: 
   - Oracle.Installation
 comments: true
