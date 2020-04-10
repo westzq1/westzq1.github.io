@@ -7,7 +7,7 @@ tags:
   - Oracle.Installation
 comments: true
 ---
-Update July 26 <br/>
+<span style="color:#ff0000;"><strong>Update July 26</strong></span> <br/>
 
 Get feedback from Oracle, Using _JAVA_OPTIONS could change the position of tmp folder OPatch uses.<br/>
  
