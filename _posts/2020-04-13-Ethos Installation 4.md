@@ -7,4 +7,52 @@ tags:
   - Banner.Ethos
 comments: true
 ---
-dasds
+<span style="color:#ff0000;"><strong>1. Pre-Generation</strong></span>
+<br>1. Ellucian announanced that GUID generation can be done when the application is online, but unfortunately, in our case, during generation, some triggers will be fired and generate a lot of messages to workflow to send email out to the end use which may confuse them.
+<br>2. Suggest to switch database into restricted mode and disable all triggers in the underlying tables except the triggers whose named end with %GUID_TRG'and '%SURROGATE_ID'
+<br>3. Revoke permission 'restricted session' and role 'dba' from all business users except SATURN. No connection through this user, and if remove dba from SATURN, some tables will be failed.
+<br>4. Backup table GOREQRC and GOBEQRC, after GUID generation, check the number of records on these two tables to make sure they are unchanged. Otherwise, after application up, some confusing messages will be sent out by workflow.
+<br>5. Grant restricted session to BANGUIDGEN, this is the database user we use to schedule the script.
+<br>6. The script used to schedule GUID generation is gurguid_in_restricted_mode.sql, we need to do the following changes:
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  p_add_parm('08', 'N');   -- change from Y to N to run multiple schedules
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  p_add_parm('09', 'Y');   -- change to Y to disable BEP trigger during GUID generation
+
+<span style="color:#ff0000;"><strong>2. Generation</strong></span>
+<pre class="prettyprint lang-sql linenums=1 ">
+# schedule 10 sessions working together on the GUID generation.
+# It will use Oracle Scheduler to run in the background
+
+$ sqlplus BANGUIDGEN/oracle123 @$GUIDGEN/gurguid_in_restricted_mode.sql  
+$ sqlplus BANGUIDGEN/oracle123 @$GUIDGEN/gurguid_in_restricted_mode.sql  
+$ sqlplus BANGUIDGEN/oracle123 @$GUIDGEN/gurguid_in_restricted_mode.sql 
+$ sqlplus BANGUIDGEN/oracle123 @$GUIDGEN/gurguid_in_restricted_mode.sql 
+$ sqlplus BANGUIDGEN/oracle123 @$GUIDGEN/gurguid_in_restricted_mode.sql  
+$ sqlplus BANGUIDGEN/oracle123 @$GUIDGEN/gurguid_in_restricted_mode.sql 
+$ sqlplus BANGUIDGEN/oracle123 @$GUIDGEN/gurguid_in_restricted_mode.sql 
+$ sqlplus BANGUIDGEN/oracle123 @$GUIDGEN/gurguid_in_restricted_mode.sql  
+$ sqlplus BANGUIDGEN/oracle123 @$GUIDGEN/gurguid_in_restricted_mode.sql 
+$ sqlplus BANGUIDGEN/oracle123 @$GUIDGEN/gurguid_in_restricted_mode.sql 
+</pre>
+<br>In my case, it took two and half hours to be done.
+<br>SATURN.SFRSTCR spends 2 hours to be done. Others normally finish in 45 minutes.
+
+<span style="color:#ff0000;"><strong>3. Monitor</strong></span>
+<pre class="prettyprint lang-sql linenums=1 ">
+# The status of each tables 
+select gurtrck_curr_object_status, count(*) 
+  from GURTRCK 
+ where gurtrck_object_type = 'GUID_GEN'
+ group by gurtrck_curr_object_status;
+
+# After we submit a scheduler, a one-up-no will be in the log file.
+# Using this number to get the details.
+select GUROUTP_LINE 
+  from GENERAL.GUROUTP 
+ where GUROUTP_ONE_UP_NO=6065907
+ order by GUROUTP_LINE
+</pre>
+
+<span style="color:#ff0000;"><strong>3. Post-Generation</strong></span>
+<br>1. compare the number of records in COBEQRC and GOREQRC
+<br>2. enable triggers
+<br>3. grant dba role to the users which needs, be careful, some business set dba role as the default role.

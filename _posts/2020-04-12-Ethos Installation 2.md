@@ -7,4 +7,173 @@ tags:
   - Banner.Ethos
 comments: true
 ---
-ddasdasd
+<br>Summay:
+<br>&nbsp;&nbsp;&nbsp;1.BEP pushs the data changes which BEP captures from Banner to RabbitMQ.
+<br>&nbsp;&nbsp;&nbsp;2.Internally, Messaging Service is a wrapper of RabiitMQ.
+<br>&nbsp;&nbsp;&nbsp;3.Messaging Adapter will fetch data out from RabbitMQ and push it to Ethos Cloud. 
+<br>
+<br>
+<span style="color:#ff0000;"><strong>1. Packages</strong></span>
+<pre class="prettyprint lang-sql linenums=1 ">
+rabbitmq-server-3.7.17-1.el6.noarch
+https://github.com/rabbitmq/rabbitmq-server/releases/download/v3.7.17/rabbitmq-server-3.7.17-1.el7.noarch.rpm
+
+erlang-22.0.6-1.el6.x86_64
+https://dl.bintray.com/rabbitmq-erlang/rpm/erlang/22/el/6/x86_64/:erlang-22.0.7-1.el6.x86_64.rpm
+</pre>
+
+<span style="color:#ff0000;"><strong>2. Generate SSL cert & key</strong></span>
+
+<pre class="prettyprint linenums=1 ">
+Create Self-signing Authority and Root certificate
+
+# mkdir testca ; cd testca
+# mkdir certs; mkdir private; chmod 700 private
+# touch index.txt; echo 01 > serial
+# vi openssl.cnf
+[ ca ]
+default_ca = testca
+[ testca ]
+dir = .
+certificate = $dir/cacert.pem
+database = $dir/index.txt
+new_certs_dir = $dir/certs
+private_key = $dir/private/cakey.pem
+serial = $dir/serial
+default_crl_days = 7
+default_days = 365
+default_md = sha1
+policy = testca_policy
+x509_extensions = certificate_extensions
+[ testca_policy ]
+commonName = supplied
+stateOrProvinceName = optional
+countryName = optional
+emailAddress = optional
+organizationName = optional
+organizationalUnitName = optional
+[ certificate_extensions ]
+basicConstraints = CA:false
+[ req ]
+default_bits = 2048
+default_keyfile = ./private/cakey.pem
+default_md = sha1
+prompt = yes
+distinguished_name = root_ca_distinguished_name
+x509_extensions = root_ca_extensions
+[ root_ca_distinguished_name ]
+commonName = hostname
+[ root_ca_extensions ]
+basicConstraints = CA:true
+keyUsage = keyCertSign, cRLSign
+[ client_ca_extensions ]
+basicConstraints = CA:false
+keyUsage = digitalSignature
+extendedKeyUsage = 1.3.6.1.5.5.7.3.2
+[ server_ca_extensions ]
+basicConstraints = CA:false
+keyUsage = keyEncipherment
+extendedKeyUsage = 1.3.6.1.5.5.7.3.1
+
+Create the Root Certificate for the self-signing authority
+# openssl req -x509 -config openssl.cnf -newkey rsa:2048 -days 3650 -out cacert.pem -outform PEM -subj /CN=MyTestCA/ -nodes
+
+Convert the public key to the DER format
+# openssl x509 -in cacert.pem -out cacert.cer -outform DER
+			
+The files of root certificate: cacert.pem / cacert.cer
+
+Generate RabbitMQ Server certificate
+# mkdir server; cd server
+
+Generate a key
+# openssl genrsa -out key.pem 2048
+
+Generate a request
+# openssl req -new -key key.pem -out req.pem -outform PEM -subj /CN=emb1.pprd.odu.edu/O=server/ -nodes 
+
+CA sign the server certificate
+# cd ..
+# openssl ca -config openssl.cnf -in server/req.pem -out server/cert.pem -notext -batch -extensions server_ca_extensions
+
+Generate the keystore
+# cd server
+# openssl pkcs12 -export -out keycert.p12 -in cert.pem -inkey key.pem -passout pass:oreol410g    <- keyStorePassPhrase.
+
+Generate RabbitMQ Client certificate
+# mkdir client; # cd client
+
+Generate a key
+# openssl genrsa -out key.pem 2048
+
+Generate a request
+# openssl req -new -key key.pem -out req.pem -outform PEM -subj /CN=bep.pprd.odu.edu/O=client/ -nodes
+
+CA sign the client certificate
+# cd ..
+# openssl ca -config openssl.cnf -in client/req.pem -out client/cert.pem -notext -batch -extensions client_ca_extensions
+
+Generate the keystore
+# cd client
+# openssl pkcs12 -export -out keycert.p12 -in cert.pem -inkey key.pem -passout pass:oreol410g    <- keyStorePassPhrase.
+</pre>
+
+<span style="color:#ff0000;"><strong>3. Configure</strong></span>
+<pre class="prettyprint  linenums=1 ">
+$ cat /etc/rabbitmq/rabbitmq.config|grep -v -E %%|grep -v -E "^$"
+[
+ {rabbit,
+     {ssl_listeners, [5671]},
+     {ssl_options, [{cacertfile,           "/l01/app/ca_certs/testca/cacert.pem"},
+                    {certfile,             "/l01/app/ca_certs/testca/server/cert.pem"},
+                    {keyfile,              "/l01/app/ca_certs/testca/server/key.pem"}, 
+                    {verify,               verify_peer},
+                    {fail_if_no_peer_cert, false},
+                    {versions, ['tlsv1.2', 'tlsv1.1', tlsv1]},
+                    {ciphers, ["ECDHE-ECDSA-AES256-GCM-SHA384","ECDHE-RSA-AES256-GCM-SHA384",
+                      "ECDHE-ECDSA-AES256-SHA384","ECDHE-RSA-AES256-SHA384", "ECDHE-ECDSA-DES-CBC3-SHA",
+                      "ECDH-ECDSA-AES256-GCM-SHA384","ECDH-RSA-AES256-GCM-SHA384","ECDH-ECDSA-AES256-SHA384",
+                      "ECDH-RSA-AES256-SHA384","DHE-DSS-AES256-GCM-SHA384","DHE-DSS-AES256-SHA256",
+                      "AES256-GCM-SHA384","AES256-SHA256","ECDHE-ECDSA-AES128-GCM-SHA256",
+                      "ECDHE-RSA-AES128-GCM-SHA256","ECDHE-ECDSA-AES128-SHA256","ECDHE-RSA-AES128-SHA256",
+                      "ECDH-ECDSA-AES128-GCM-SHA256","ECDH-RSA-AES128-GCM-SHA256","ECDH-ECDSA-AES128-SHA256",
+                      "ECDH-RSA-AES128-SHA256","DHE-DSS-AES128-GCM-SHA256","DHE-DSS-AES128-SHA256",
+                      "AES128-GCM-SHA256","AES128-SHA256","ECDHE-ECDSA-AES256-SHA",
+                      "ECDHE-RSA-AES256-SHA","DHE-DSS-AES256-SHA","ECDH-ECDSA-AES256-SHA",
+                      "ECDH-RSA-AES256-SHA","AES256-SHA","ECDHE-ECDSA-AES128-SHA",
+                      "ECDHE-RSA-AES128-SHA","DHE-DSS-AES128-SHA","ECDH-ECDSA-AES128-SHA",
+                      "ECDH-RSA-AES128-SHA","AES128-SHA"]},
+                    {honor_cipher_order, true}
+                     ]}
+
+
+
+  ]},
+ {kernel,
+  ]},
+ {rabbitmq_management,
+  ]},
+ {rabbitmq_management_agent,
+  ]},
+ {rabbitmq_shovel,
+  [{shovels,
+    ]}
+  ]},
+ {rabbitmq_stomp,
+  ]},
+ {rabbitmq_mqtt,
+  ]},
+ {rabbitmq_amqp1_0,
+  ]},
+ {rabbitmq_auth_backend_ldap,
+  ]}
+].
+</pre>
+<span style="color:#ff0000;"><strong>4. Define resources</strong></span>
+<pre class="prettyprint lang-sh linenums=1 ">
+# rabbitmqctl add_user ellucian oracle123
+# rabbitmqctl add_vhost bep_events_host
+# rabbitmqctl set_permissions -p bep_events_host ellucian ".*" ".*" ".*"
+# rabbitmqctl authenticate_user ellucian oracle123
+# rabbitmqctl set_user_tags ellucian administrator
+</pre>

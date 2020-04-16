@@ -16,14 +16,14 @@ comments: true
 <br>
 <br>The following components need to be installed if you only use the first one
 <br>&nbsp;1. Ethos API DB Upgrade
-<br>&nbsp;2. Ethos API Management Center	
-<br>&nbsp;3. Banner Student API
-<br>&nbsp;4. Banner Integration API
+<br>&nbsp;2. Ethos API Management Center - emb1	
+<br>&nbsp;3. Banner Student API - emb1	
+<br>&nbsp;4. Banner Integration API - emb1	
 
 <br>If you plan to use subscription, you need to install
-<br>&nbsp;1. BEP
-<br>&nbsp;2. Ellucian Messaging Service 
-<br>&nbsp;3. Ellucian Messaging Adapter
+<br>&nbsp;1. BEP - bep
+<br>&nbsp;2. Ellucian Messaging Service - emb1	
+<br>&nbsp;3. Ellucian Messaging Adapter - emb1	
 
 <span style="color:#ff0000;"><strong>2. compatibility</strong></span>
 <br>We should go to 
