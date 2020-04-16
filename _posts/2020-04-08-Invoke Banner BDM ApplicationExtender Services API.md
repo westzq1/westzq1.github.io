@@ -1,6 +1,6 @@
 ---
 layout: post
-title: How to invoke Banner BDM ApplicationExtender Service API
+title: Invoke Banner BDM ApplicationExtender Service API
 modified: 2020-04-08
 categories: [Banner]  
 tags: 
@@ -11,8 +11,8 @@ Due to the situation of Conorvius, all stuff in my university works from home. <
 In order to forward fax to BDM directly, we asked DSG to convert fax to PDF to a shared folder at first.<br>
 And then, I am writing a python code to invoke ApplicationExtender API to index PDFs to a new created app.<br>
 
-I have done the code for the Login, CreateNewDocument, CreateBatchPage, and UploadImageStream.<br>
-But unfortunately, only Login and CreateNewDocument are working.<br>
+I have done the code for the Login, Logout, CreateNewDocument, unlockDocumentByRef, CreateBatchPage, and UploadImageStream.<br>
+But unfortunately, CreateBatchPage and UploadImageStream are not working.<br>
 The document of ApplicationExtender is ridiculous, full of the error. <br>
 And there is no way for debuging.<br>
 
@@ -28,15 +28,15 @@ import base64
 import os
 import datetime
 import sys
+import smtplib
 
 user = 'user'
 password = 'password'
 datasource = 'datasource'
 
-
 class AxServices:
     # constant variable
-    url = 'https://Server/AppXtenderServices/axservicesinterface.asmx'
+    url = 'https://xxx.odu.edu/AppXtenderServices/axservicesinterface.asmx'
     xsi = 'http://www.w3.org/2001/XMLSchema-instance'
     xsd = 'http://www.w3.org/2001/XMLSchema'
     ax = 'http://www.emc.com/ax'
@@ -68,14 +68,14 @@ class AxServices:
             attr['dsn'] = dsn
             attr['appid'] = appid
             attr['filepath'] = filepath
-            attr['filetype'] = 'FT_PDF'  # AxTypes.FileType
-            #   FT_UNKNOWN = 0 / FT_Text = 1 / FT_CompressedText = 2
-            #   FT_ForeignFile = 3 / FT_OLE = 4 / FT_RTF = 5
-            #   FT_HTML = 6 / FT_PDF = 7 / FT_IMAGE = 8 / FT_Annotation = 255
-            attr['ignore_dls'] = AxServices.true  # Indicates whether to ignore document-level security checking while saving index values
-            attr['ignore_dup_index'] = AxServices.true  # Indicates whether to ignore duplicated indexes while saving index values
-            attr['splitimg'] = AxServices.true  # Indicates whether to split multi-page image files such as PDF, TIFF, and text.
-            attr['subpages'] = '0'  # Number of sub-pages in the image file
+            attr['filetype'] = 'FT_PDF'     # AxTypes.FileType
+                                            #   FT_UNKNOWN = 0 / FT_Text = 1 / FT_CompressedText = 2
+                                            #   FT_ForeignFile = 3 / FT_OLE = 4 / FT_RTF = 5
+                                            #   FT_HTML = 6 / FT_PDF = 7 / FT_IMAGE = 8 / FT_Annotation = 255
+            attr['ignore_dls'] = AxServices.true          # Indicates whether to ignore document-level security checking while saving index values
+            attr['ignore_dup_index'] = AxServices.true    # Indicates whether to ignore duplicated indexes while saving index values
+            attr['splitimg'] = AxServices.true            # Indicates whether to split multi-page image files such as PDF, TIFF, and text.
+            attr['subpages'] = '0'          # Number of sub-pages in the image file
             super().__init__('AxDocCrtData', attr)
 
     class QueryItem(AxObject):
@@ -128,16 +128,17 @@ class AxServices:
         action_dict = {'Login': 'Login',
                        'CreateNewDocument': 'CreateNewDocument',
                        'CreateBatchPage': 'CreateBatchPage',
-                       'UploadImageStream': 'UploadImageStream'
-                       }
+                       'UploadImageStream': 'UploadImageStream',
+                       'Logout':'Logout',
+                       'UnlockDocumentByRef':'UnlockDocumentByRef'
+                      }
 
         def __init__(self, data):
             self.header['Content-Type'] = 'text/xml; charset=utf-8'
-            self.header['Host'] = 'webxt.pprd.odu.edu'
-            self.header['SOAPAction'] = "http://documentum.com/AX/WebServices" + '/' + self.action_dict[
-                type(self).__name__]
-            self.doc = ''
-            self.response = ''
+            self.header['Host'] = 'xxxx.odu.edu'
+            self.header['SOAPAction'] = "http://documentum.com/AX/WebServices" + '/' + self.action_dict[type(self).__name__]
+            self.doc=''
+            self.response=''
             self.setBody(data)
 
         def setBody(self, data):
@@ -198,6 +199,11 @@ class AxServices:
         def getSessionTicket(self):
             return super().getResponseResult()
 
+    class Logout(Request):
+        def __init__(self, ticket):
+            self.data = {'sessionTicket': ticket}
+            super().__init__(self.data)
+        
     class CreateNewDocument(Request):
         def __init__(self, ticket, data, idx):
             self.data = {'sessionTicket': ticket, 'xmlAxDocumentCreationData': str(data), 'xmlDocIndex': str(idx)}
@@ -212,10 +218,14 @@ class AxServices:
         def getRef(self):
             return self.getDoc().getAttribute('objref')
 
+    class UnlockDocumentByRef(Request):
+        def __init__(self, ticket, ref):
+            self.data = {'sessionTicket': ticket, 'docReference': ref}
+            super().__init__(self.data)
+        
     class CreateBatchPage(Request):
         def __init__(self, ticket, ds, appid, batchname, data):
-            self.data = {'sessionTicket': ticket, 'dataSource': ds, 'appid': appid, 'batchname': batchname,
-                         'xmlPageUploadData': str(data)}
+            self.data = {'sessionTicket': ticket, 'dataSource': ds, 'appid': appid, 'batchname': batchname,  'xmlPageUploadData': str(data)}
             super().__init__(self.data)
 
     class UploadImageStream(Request):
@@ -236,12 +246,19 @@ class AxServices:
         obj = self.Login(ds, user, password)
         ret = obj.post()
         if ret == 200:
+            print("login successfully")
             self.sessionTicket = obj.getSessionTicket()
             self.dataSource = ds
         else:
             raise Exception(ret, obj.getResponseText())
         return self.sessionTicket
 
+    def logout(self):
+        obj = self.Logout(self.sessionTicket)
+        ret = obj.post()
+        if ret != 200:
+            raise Exception(ret, obj.getResponseText())
+    
     def getSessionTicket(self):
         return self.sessionTicket;
 
@@ -253,9 +270,16 @@ class AxServices:
         ret = obj.post()
         if ret == 200:
             print('success, doc id: ' + obj.getDocID() + ' ref: ' + obj.getRef())
+            return obj.getRef()
         else:
             raise Exception(ret, obj.getResponseText())
-
+        
+    def unlockdocumentbyref(self, ref):
+        obj = self.UnlockDocumentByRef(self.sessionTicket, ref)
+        ret = obj.post()
+        if ret != 200:
+            raise Exception(ret, obj.getResponseText())
+        
     def createbatchpage(self, appid, batchname, data):
         obj = self.CreateBatchPage(self.sessionTicket, self.dataSource, appid, batchname, data.toXML())
         ret = obj.post()
@@ -284,45 +308,63 @@ class AxServices:
                 break
             sdata = srv.AxStreamData(key, tail, data, idx * self.buffer_size)
             key = srv.uploadimagestream(sdata)
-            idx = idx + 1
+            idx = idx+1
 
         return key
 
-    def indexDocByFolder(self, appid, dir, tpath):
+    def indexDocByFolder(self, appid, dir, tpath, fpath):
+        failed = 0
         first = True;
         seq = 0;
         for file in os.listdir(dir):
             seq = seq + 1
-            filePath = str(dir) + '/' + str(file)
+            filePath = str(dir)+'/' + str(file)
             tgtPath = str(tpath) + '/' + str(file)
+            faildPath = str(fpath) + '/' + str(file)
             if file.upper().endswith('.PDF'):
                 # t = datetime.datetime.now()
                 t = datetime.datetime.fromtimestamp(os.path.getmtime(filePath))
-                id = str(appid) + '_' + str(file).replace(' ', '_').replace('.', '_').replace('(', '').replace(')',
-                                                                                                               '') + '_' + str(
-                    t.strftime('%Y%m%d%H%M%S')) + '_' + str(seq)
-                print("[START] " + filePath + "," + id)
+                id = str(appid) + '_' + str(file).replace(' ', '_').replace('.','_').replace('(','').replace(')','') + '_' + str(t.strftime('%Y%m%d%H%M%S')) + '_'  + str(seq)
+                print("[START] "+ filePath + "," + id)
                 data = srv.AxDocCrtData(str(appid), self.dataSource, filePath)
                 idx = srv.QueryItem()
                 idx.addField(1, id, AxServices.false)
-                idx.addField(2, t.strftime('%Y-%m-%d %H:%M:%S'), AxServices.false)
-                srv.createnewdocument(data, idx)
-                os.rename(filePath, tgtPath)
+                #idx.addField(2, t.strftime('%Y-%m-%d %H:%M:%S'), AxServices.false)
+                idx.addField(2, t.strftime('%m-%d-%Y'), AxServices.false)
+                try:
+                    ref = srv.createnewdocument(data, idx)
+                    srv.unlockdocumentbyref(ref)
+                    os.rename(filePath, tgtPath)
+                except Exception as e:
+                    os.rename(os.rename(filePath, failedPath))
+                    failed = failed + 1
                 print("[END] " + filePath)
-        print(str(seq) + " files processed.")
-
-
+        print(str(seq) + " files processed, " + str(failed) + " failed.")
+        return seq, failed        
+                
 if __name__ == "__main__":
-    srv = AxServices()
-    ticket = srv.login(datasource, user, password)
-    if len(sys.argv) != 4:
-        print('Three Args, appid, source path, and processed path')
+    if len(sys.argv) != 5:
+        print('Four Args, appid, source path, processed path, and failed path')
         exit(-1)
     appid = sys.argv[1]
     spath = sys.argv[2]
     tpath = sys.argv[3]
+    fpath = sys.argv[4]
 
-    srv.indexDocByFolder(appid, spath, tpath)
+    failed = 0
+
+    try:
+        srv = AxServices()
+        ticket = srv.login(datasource, user, password)
+        processed, failed = srv.indexDocByFolder(appid, spath, tpath, fpath)
+        srv.logout()
+    
+        if failed > 0:
+            failed = -1
+            raise Exception('400','login failed')
+    except Exception as e:
+      smtp = smtplib.SMTP('smtp.odu.edu')
+      smtp.sendmail('dba-dist@odu.edu','dba-dist@odu.edu','[BDM Automation]: '+ str(failed) + ' failed.')
 
     # CreateNewDocument
     # data = srv.AxDocCrtData('509', srv.dataSource, 'c:/bdm_file/test.pdf')
