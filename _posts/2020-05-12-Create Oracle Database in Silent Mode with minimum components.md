@@ -38,3 +38,16 @@ $ORACLE_HOME/rdbms/admin/owmuinst.plb
 </pre>
 
 <span style="color:#ff0000;"><strong>XDB is mandatory after 12.1</strong></span>
+
+
+The list of componment:
+<pre class="prettyprint lang-sql linenums=1 ">
+SQL> select COMP_NAME, VERSION from dba_registry;
+
+COMP_NAME						     VERSION
+------------------------------------------------------------ ------------------------------
+Oracle Database Catalog Views				     19.0.0.0.0
+Oracle Database Packages and Types			     19.0.0.0.0
+Oracle Real Application Clusters			     19.0.0.0.0
+Oracle XML Database					     19.0.0.0.0
+</pre>
