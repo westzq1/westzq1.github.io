@@ -40,7 +40,7 @@ $ORACLE_HOME/rdbms/admin/owmuinst.plb
 <span style="color:#ff0000;"><strong>XDB is mandatory after 12.1</strong></span>
 
 
-The list of componment:
+The list of componments installed:
 <pre class="prettyprint lang-sql linenums=1 ">
 SQL> select COMP_NAME, VERSION from dba_registry;
 
