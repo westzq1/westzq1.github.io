@@ -1,7 +1,7 @@
 ---
 layout: post
 title: Oracle - Create a Database in Silent Mode with minimum components
-modified: 2020-04-28
+modified: 2020-5-12
 categories: [Oracle]  
 tags: 
   - Oracle.Installation
