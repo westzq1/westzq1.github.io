@@ -1,0 +1,239 @@
+I"�+<p>Orion is a disk performance test tool which is provided by Oracle. <br />
+It used to simulate the characteristic of different type of database IO, to do pressure test on the disk.</p>
+
+<p>For example:</p>
+
+<ol>
+  <li>Small random IO: index range scan, access row from index.</li>
+  <li>Large random IO: due to the disk striping, a sequential read is extended to more than one disks, so, on the disk level, the continuous read can be seem as random IO with size 1MB.</li>
+  <li>Large Sequential IO: data loading / backup / restore. Also for parallel query which subprocess can coordinate together.</li>
+  <li>mixed load.</li>
+</ol>
+
+<p>Orion supports different type of files on the storage.</p>
+
+<p>For example:</p>
+<ol>
+  <li>raw disks, and simulate striping, as ASM.</li>
+  <li>raw disks, don’t simulate striping, as used for datafile directly.</li>
+  <li>filesystem, create files on it and use files for testing, don’t simulate striping</li>
+</ol>
+
+<hr />
+<p>The options of Orion</p>
+
+<p><strong>-run</strong></p>
+<ol>
+  <li>simple: Tests random small (8K) IOs at various loads, <span style="color:#ff0000;">show IOPS &amp; Latency,</span> then random large (1M) IOs at various loads, <span style="color:#ff0000;">show Mbps</span></li>
+  <li>normal: Tests combinations of random small (8K) IOs and random large (1M) IOs. <span style="color:#ff0000;">Do testing for the combination of n*m matrix, for all of three testing.</span></li>
+  <li>advanced: Tests the workload specified by the user using optional parameters</li>
+  <li>dss: Tests with random large (1M) IOs at increasing loads to determine the maximum throughput. <span style="color:#ff0000;">Only show Mbps</span></li>
+  <li>oltp: Tests with random small (8K) IOs at increasing loads to determine the maximum IOPS.<span style="color:#ff0000;"> Only show IOPS and Latency</span></li>
+</ol>
+
+<p><strong>-testname</strong></p>
+<ol>
+  <li>Name of the test run.
+<span style="color:#ff0000;">Orion read the file named .lun which is a list of disks or files for testing.</span></li>
+</ol>
+
+<p><strong>-num_disks</strong></p>
+<ol>
+  <li>Number of disks (physical spindles). This number is used to gauge the range of loads that Orion should test at. Increasing this parameter results in Orion using heavier IO loads. Default is the number of LUNs in .lun.</li>
+</ol>
+
+<p><strong>-size_small</strong></p>
+<ol>
+  <li>Size of small IOs in KB. Default is 8.
+<span style="color:#ff0000;">Normally, it should be set to the same as db_block_size of the database you want to create.</span></li>
+</ol>
+
+<p><strong>-size_large</strong></p>
+<ol>
+  <li>Size of large IOs in KB. Default is 1024.
+<span style="color:#ff0000;">It should be set to the maximum IO size of OS. Normally, it is 1MB for the most of OS</span></li>
+</ol>
+
+<p><strong>-type</strong></p>
+<ol>
+  <li>Type of large IOs (rand, seq). Default is rand.</li>
+  <li><span style="color:#ff0000;">The full table scan is Randomly distributed large IO</span></li>
+  <li><span style="color:#ff0000;">And the data loading / backup / restore and parallel query are Sequential streams of large IOs</span></li>
+</ol>
+
+<p><strong>-num_streamIO</strong></p>
+<ol>
+  <li>Number of concurrent IOs per stream. This parameter is only used if -type is seq. Default is 4.</li>
+  <li><span style="color:#ff0000;">It is equal to a query in Oracle database with /<em>+parallel(a,4)</em>/</span></li>
+</ol>
+
+<p><strong>-simulate</strong></p>
+<ol>
+  <li>Orion tests on a virtual LUN formed by combining the specified LUNs in one of these ways. This parameter is typically only used if -type is seq. Default is raid0.</li>
+  <li>concat - A serial concatenation of the LUNs. Each sequential stream issues IOs to only one LUN.</li>
+  <li>raid0 - A RAID-0 mapping across the LUNs. Each sequential stream issues IOs across all LUNs, using RAID-0 striping.</li>
+  <li><span style="color:#ff0000;">If you are using ASM, regardless whether you do striping in storage, the ASM will do striping again on the ASM level, so, it should be set to raid0.</span></li>
+  <li><span style="color:#ff0000;">If you are using raw devices as datafiles, it should be set to concat. Orion does testing on each file.</span></li>
+</ol>
+
+<p><strong>-write</strong></p>
+<ol>
+  <li>Percentage of IOs that are writes (SEE WARNING ABOVE). Default is 0.</li>
+  <li><span style="color:#ff0000;">For read testing, set to 0, for write testing, set to 100, for mixed, set to 1-99</span></li>
+</ol>
+
+<p><strong>-cache_size</strong></p>
+<ol>
+  <li>Size in MBs of the array’s cache. Unless this option is set to 0, Orion issues a number of unmeasured, random IOs before each large sequential data point.</li>
+  <li>These IOs fill up the storage array’s cache (if any) with random data so that IOs from one data point do not result in cache hits for the next data point. Reading tests are preceded with junk reads and writing tests are preceded with junk writes.</li>
+  <li>If specified, this ‘cache warming’ is performed until cache_size MBs of IO have been read or written. Default behavior is to issue 2 minutes of unmeasured random IOs before each data point.</li>
+  <li><span style="color:#ff0000;">This parameter is used to reduce the impact of the cache on the test. To large value consumes a lot of additional time for testing</span></li>
+</ol>
+
+<p><strong>-duration</strong></p>
+<ol>
+  <li>Duration of each data point in seconds. Default is 60.</li>
+</ol>
+
+<p><strong>-nosleep_on_delay</strong></p>
+<ol>
+  <li>Polls the timer instead of sleeping when a delay set between IO requests</li>
+</ol>
+
+<p><strong>-iorate_small</strong></p>
+<ol>
+  <li>Rate of small IOs that needs to be maintained for duration of test. Not used by default.</li>
+</ol>
+
+<p><strong>-iorate_large</strong></p>
+<ol>
+  <li>Rate of large IOs that needs to be maintained for duration of test. Not enabled by default</li>
+</ol>
+
+<p><strong>-num_small</strong></p>
+<ol>
+  <li>Number of outstanding small IOs. This parameter controls the small IO load. Only used if -matrix is point, col, or max. No default.</li>
+</ol>
+
+<p><strong>-num_large</strong></p>
+<ol>
+  <li>This parameter controls the large IO load. For -type rand, number of outstanding large IOs. For -type seq, number of sequential IO streams. Only used if -matrix is point, row, or max. No default.</li>
+</ol>
+
+<p><strong>-matrix</strong></p>
+<ol>
+  <li>An Orion test consists of multiple data point tests. These data point tests can be represented as a two-dimensional matrix. Each column in the matrix represents data point tests with the same small IO load, but varying large IO loads. Each row represents data point tests with the same large IO load, but varying small IO loads. An Orion test can be for a single point, a single row, a single column, or the whole matrix, depending on the matrix option setting below. Default is basic.</li>
+  <li>basic - Test small IOs only, then large IOs only.</li>
+  <li>detailed - Test entire matrix.</li>
+  <li>point - Test with num_small small IOs, num_large large IOs.</li>
+  <li>col - Test a varying large IO load with num_small small IOs.</li>
+  <li>row - Test a varying small IO load with num_large large IOs.</li>
+  <li>max - Test varying loads up to the num_small and num_large limits.</li>
+</ol>
+
+<p><strong>-hugenotneeded</strong></p>
+<ol>
+  <li>Tells Orion to allocate regular pages when huge pages are not available. With out this option, on systems that support hugepages, Orion errors out when it cannot allocate sufficient huge pages. -hugenotneeded is not set by default.</li>
+  <li><span style="color:#ff0000;">If huge page is not configured yet, use this parameter.</span></li>
+</ol>
+
+<p><strong>-verbose</strong></p>
+<ol>
+  <li>Prints tracing information to standard output if set. Not set by default.</li>
+</ol>
+
+<p><strong>-large_io_hist</strong></p>
+<ol>
+  <li>Prints detailed output with Large IO latency histogram and other detailed information for large and small IOs. Not enabled by default.</li>
+  <li>Latency information will be reported in the summary and hist, but the chart of IOPS and latency is still empty.</li>
+</ol>
+
+<p><strong>-datainput</strong></p>
+<ol>
+  <li>Name of the input file for data to be written.</li>
+</ol>
+
+<p><strong>-is_lgwr</strong></p>
+<ol>
+  <li>If set to true will run test using VIP level QOS, assuming the underlying transport supports it.</li>
+  <li><span style="color:#ff0000;">VIP: Versatile Interface Processors</span></li>
+  <li><span style="color:#ff0000;">QOS: Quality of Service</span></li>
+</ol>
+
+<p><strong>-is_rdma_lgwr</strong></p>
+<ol>
+  <li>If set to true will run test using VIP level and rdma hint assuming the underlying transport supports it.</li>
+  <li><span style="color:#ff0000;">rdma: Remote direct memory access</span></li>
+</ol>
+
+<p><strong>-no_hi_bw</strong></p>
+<ol>
+  <li>If present won’t run as high-bandwidth client</li>
+</ol>
+
+<p><strong>-iotype</strong></p>
+<ol>
+  <li>IO Modes: async, directio, setall, none. (Default is setall)</li>
+  <li><span style="color:#ff0000;">If using filesystem for database, set it as filesystemio_options in database.</span></li>
+</ol>
+
+<p><strong>-rtstats_interval</strong></p>
+<ol>
+  <li>Interval (in seconds) at which the cumulative statistics of the last interval is printed on stdout</li>
+</ol>
+
+<p><strong>-hist_granule</strong></p>
+<ol>
+  <li>Granularity (in usecs) of latency histogram</li>
+</ol>
+
+<p><strong>-filetype</strong></p>
+<ol>
+  <li>Access filetype to use. Consult skgfr.h:skgfrftnm for valid values.</li>
+</ol>
+
+<p><strong>-writereadonce</strong></p>
+<ol>
+  <li>Set the IORM Read/Write Once flag.</li>
+</ol>
+
+<hr />
+<p>Normally,  we can do the following tests:</p>
+
+<p><strong>large IO read</strong><br />
+/u01/app/18.3.0/grid/bin/orion -run dss -testname dbtest -large_io_hist -hugenotneeded -verbose</p>
+
+<p><strong>small IO read</strong><br />
+/u01/app/18.3.0/grid/bin/orion -run oltp -testname dbtest -hugenotneeded -verbose</p>
+
+<p><strong>Parallel 32 read</strong><br />
+/u01/app/18.3.0/grid/bin/orion -run advanced -testname dbtest -write 0 -matrix max -num_large 1 -num_small 0 -type seq -num_streamIO 32 -hugenotneeded -verbose</p>
+
+<p><strong>DBWR write, 8 processes</strong><br />
+/u01/app/18.3.0/grid/bin/orion -run advanced -testname dbtest -size_small 8 -write 100 -matrix max -num_large 0 -num_small 8 -hugenotneeded -verbose</p>
+
+<p><strong>Data loading, parallel 32</strong><br />
+/u01/app/18.3.0/grid/bin/orion -run advanced -testname dbtest -size_small 32 -write 100 -matrix max -num_large 1 -num_small 0 -type seq -num_streamIO 32 -hugenotneeded -verbose
+/u01/app/18.3.0/grid/bin/orion -run advanced -testname dbtest -size_small 8 -write 100 -matrix max -num_large 8 -num_small 0 -hugenotneeded -verbose</p>
+
+<p><strong>Mixed</strong><br />
+/u01/app/18.3.0/grid/bin/orion -run normal -testname dbtest -hugenotneeded -verbose</p>
+
+<hr />
+
+<p><strong>The following options we can use to adjust the testing</strong><br />
+to reduce the time for testing<br />
+-duration 10</p>
+
+<p>to ignore the impact of cache and save testing time<br />
+-cache_size 0</p>
+
+<p>if raw devices are used as datafiles directly<br />
+-simulate concat</p>
+
+<p>if the db_block_size is not 8K<br />
+-size_small 32</p>
+
+<p>if the IO maximum size is not equal to 1M<br />
+-size_large 2048</p>
+:ET

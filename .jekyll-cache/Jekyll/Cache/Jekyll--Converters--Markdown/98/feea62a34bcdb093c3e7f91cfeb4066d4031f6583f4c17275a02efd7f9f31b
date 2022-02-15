@@ -1,0 +1,387 @@
+I"<<p>Due to the situation of Conorvius, all stuff in my university works from home. <br />
+In order to forward fax to BDM directly, we asked DSG to convert fax to PDF to a shared folder at first.<br />
+And then, I am writing a python code to invoke ApplicationExtender API to index PDFs to a new created app.<br /></p>
+
+<p>I have done the code for the Login, Logout, CreateNewDocument, unlockDocumentByRef, CreateBatchPage, and UploadImageStream.<br />
+But unfortunately, CreateBatchPage and UploadImageStream are not working.<br />
+The document of ApplicationExtender is ridiculous, full of the error. <br />
+And there is no way for debuging.<br /></p>
+
+<p>We are using RESTful API to upload file as batch. In stead of going on the research of CreateBatchPage and UploadImageStream to save the time. <br /></p>
+
+<p>The code will iterator files in one folder, then, call CreateNewDocument to index each PDF with two field: ID and Time.</p>
+
+<pre class="prettyprint lang-java linenums=1 ">
+import xml.dom.minidom
+from xml.dom.minidom import parse, parseString
+import requests
+import base64
+import os
+import datetime
+import sys
+import smtplib
+
+user = 'user'
+password = 'password'
+datasource = 'datasource'
+
+class AxServices:
+    # constant variable
+    url = 'https://xxx.odu.edu/AppXtenderServices/axservicesinterface.asmx'
+    xsi = 'http://www.w3.org/2001/XMLSchema-instance'
+    xsd = 'http://www.w3.org/2001/XMLSchema'
+    ax = 'http://www.emc.com/ax'
+    true = "true"
+    false = "false"
+    buffer_size = 8192
+
+    # classes
+    class AxObject:
+        def __init__(self, tag, attr):
+            self.doc = xml.dom.minidom.Document()
+            self.data = self.doc.createElement('ax:' + tag)
+            self.data.setAttribute('xmlns:xsi', AxServices.xsi)
+            self.data.setAttribute('xmlns:xsd', AxServices.xsd)
+            for key in attr:
+                self.data.setAttribute(key, attr[key])
+            self.data.setAttribute('xmlns:ax', AxServices.ax)
+            self.doc.appendChild(self.data)
+
+        def getData(self):
+            return self.data
+
+        def toXML(self):
+            return self.doc.toxml('utf-8').decode()
+
+    class AxDocCrtData(AxObject):
+        def __init__(self, appid, dsn, filepath):
+            attr = {}
+            attr['dsn'] = dsn
+            attr['appid'] = appid
+            attr['filepath'] = filepath
+            attr['filetype'] = 'FT_PDF'     # AxTypes.FileType
+                                            #   FT_UNKNOWN = 0 / FT_Text = 1 / FT_CompressedText = 2
+                                            #   FT_ForeignFile = 3 / FT_OLE = 4 / FT_RTF = 5
+                                            #   FT_HTML = 6 / FT_PDF = 7 / FT_IMAGE = 8 / FT_Annotation = 255
+            attr['ignore_dls'] = AxServices.true          # Indicates whether to ignore document-level security checking while saving index values
+            attr['ignore_dup_index'] = AxServices.true    # Indicates whether to ignore duplicated indexes while saving index values
+            attr['splitimg'] = AxServices.true            # Indicates whether to split multi-page image files such as PDF, TIFF, and text.
+            attr['subpages'] = '0'          # Number of sub-pages in the image file
+            super().__init__('AxDocCrtData', attr)
+
+    class QueryItem(AxObject):
+        def __init__(self):
+            attr = {}
+            attr['id'] = '-1'
+            super().__init__('QueryItem', attr)
+            data = super().getData()
+            self.attributes = self.doc.createElement('ax:Attributes')
+            self.fields = self.doc.createElement('ax:Fields')
+            data.appendChild(self.attributes)
+            data.appendChild(self.fields)
+
+        def addAttribute(self):
+            print('addAttribute')
+
+        def addField(self, id, val, nul):
+            field = self.doc.createElement('ax:Field')
+            field.setAttribute('id', str(id))
+            field.setAttribute('value', str(val))
+            field.setAttribute('isnull', str(nul))
+            self.fields.appendChild(field)
+
+    class AxPageUploadData(AxObject):
+        def __init__(self, filepath):
+            attr = {}
+            attr['act'] = 'InsertAfter'
+            attr['filepath'] = filepath
+            attr['filetype'] = 'FT_PDF'
+            attr['position'] = '1'
+            attr['splitimg'] = AxServices.true
+            attr['subpages'] = '0'
+            super().__init__('AxImgUploadData', attr)
+
+    class AxStreamData(AxObject):
+        def __init__(self, key, fname, data, startpos):
+            print(startpos)
+            self.attr = {}
+            self.attr['encryption'] = AxServices.false
+            self.attr['key'] = key
+            self.attr['origFile'] = fname
+            self.attr['startbyte'] = str(startpos)
+            self.attr['len'] = str(AxServices.buffer_size)
+            super().__init__('AxStreamData', self.attr)
+            sdata = super().getData();
+            sdata.setAttribute('ImageBytes', str(base64.b64encode(data)))
+
+    class Request:
+        header = {}
+        action_dict = {'Login': 'Login',
+                       'CreateNewDocument': 'CreateNewDocument',
+                       'CreateBatchPage': 'CreateBatchPage',
+                       'UploadImageStream': 'UploadImageStream',
+                       'Logout':'Logout',
+                       'UnlockDocumentByRef':'UnlockDocumentByRef'
+                      }
+
+        def __init__(self, data):
+            self.header['Content-Type'] = 'text/xml; charset=utf-8'
+            self.header['Host'] = 'xxxx.odu.edu'
+            self.header['SOAPAction'] = "http://documentum.com/AX/WebServices" + '/' + self.action_dict[type(self).__name__]
+            self.doc=''
+            self.response=''
+            self.setBody(data)
+
+        def setBody(self, data):
+            self.doc = xml.dom.minidom.Document()
+            envelope = self.doc.createElement('soap:Envelope')
+            envelope.setAttribute('xmlns:soap', 'http://schemas.xmlsoap.org/soap/envelope/')
+            envelope.setAttribute('xmlns:xsi', AxServices.xsi)
+            envelope.setAttribute('xmlns:xsd', AxServices.xsd)
+            self.doc.appendChild(envelope)
+            body = self.doc.createElement('soap:Body')
+            envelope.appendChild(body)
+            action = self.doc.createElement(self.action_dict[type(self).__name__])
+            action.setAttribute('xmlns', 'http://documentum.com/AX/WebServices')
+            body.appendChild(action)
+            for key in data:
+                ele = self.doc.createElement(key)
+                ele.appendChild(self.doc.createTextNode(str(self.data[key])))
+                action.appendChild(ele)
+            return body
+
+        def toXML(self):
+            return self.doc.toxml('utf-8').decode()
+
+        def toPXML(self):
+            return self.doc.toprettyxml('  ')
+
+        def getBody(self):
+            return self.toXML()
+
+        def post(self):
+            self.response = requests.post(AxServices.url, headers=self.header, data=self.getBody())
+            return self.response.status_code
+
+        def getResponse(self):
+            return self.response;
+
+        def getResponseText(self):
+            self.response.encoding = 'utf-8'
+            return self.response.text;
+
+        def getResponseBody(self):
+            xml = self.getResponseText();
+            dom = parseString(xml)
+            return dom.getElementsByTagName("soap:Envelope")[0].getElementsByTagName("soap:Body")[0]
+
+        def getResponseResult(self):
+            return self.getResponseBody().firstChild.firstChild.firstChild.nodeValue
+
+        def getEleByTagFromResponse(self, tag):
+            retxml = self.getResponseResult();
+            return xml.dom.minidom.parseString(retxml).getElementsByTagName(tag)
+
+    class Login(Request):
+        def __init__(self, ds, user, password):
+            self.data = {'sessionTicket': '', 'dataSource': ds, 'userId': user, 'password': password, 'features': 1}
+            super().__init__(self.data)
+
+        def getSessionTicket(self):
+            return super().getResponseResult()
+
+    class Logout(Request):
+        def __init__(self, ticket):
+            self.data = {'sessionTicket': ticket}
+            super().__init__(self.data)
+        
+    class CreateNewDocument(Request):
+        def __init__(self, ticket, data, idx):
+            self.data = {'sessionTicket': ticket, 'xmlAxDocumentCreationData': str(data), 'xmlDocIndex': str(idx)}
+            super().__init__(self.data)
+
+        def getDoc(self):
+            return super().getEleByTagFromResponse('ax:Doc')[0]
+
+        def getDocID(self):
+            return self.getDoc().getAttribute('id')
+
+        def getRef(self):
+            return self.getDoc().getAttribute('objref')
+
+    class UnlockDocumentByRef(Request):
+        def __init__(self, ticket, ref):
+            self.data = {'sessionTicket': ticket, 'docReference': ref}
+            super().__init__(self.data)
+        
+    class CreateBatchPage(Request):
+        def __init__(self, ticket, ds, appid, batchname, data):
+            self.data = {'sessionTicket': ticket, 'dataSource': ds, 'appid': appid, 'batchname': batchname,  'xmlPageUploadData': str(data)}
+            super().__init__(self.data)
+
+    class UploadImageStream(Request):
+        def __init__(self, ticket, ds, data):
+            self.data = {'sessionTicket': ticket, 'dataSource': ds, 'xmlAxStreamData': str(data)}
+            super().__init__(self.data)
+
+        def getUploadKey(self):
+            body = super().getResponseBody()
+            return body.firstChild.firstChild.firstChild.nodeValue
+
+    # functions
+    def __init__(self):
+        self.sessionTicket = ''
+        self.dataSource = ''
+
+    def login(self, ds, user, password):
+        obj = self.Login(ds, user, password)
+        ret = obj.post()
+        if ret == 200:
+            print("login successfully")
+            self.sessionTicket = obj.getSessionTicket()
+            self.dataSource = ds
+        else:
+            raise Exception(ret, obj.getResponseText())
+        return self.sessionTicket
+
+    def logout(self):
+        obj = self.Logout(self.sessionTicket)
+        ret = obj.post()
+        if ret != 200:
+            raise Exception(ret, obj.getResponseText())
+    
+    def getSessionTicket(self):
+        return self.sessionTicket;
+
+    def getDataSource(self):
+        return self.dataSource;
+
+    def createnewdocument(self, data, idx):
+        obj = self.CreateNewDocument(self.sessionTicket, data.toXML(), idx.toXML())
+        ret = obj.post()
+        if ret == 200:
+            print('success, doc id: ' + obj.getDocID() + ' ref: ' + obj.getRef())
+            return obj.getRef()
+        else:
+            raise Exception(ret, obj.getResponseText())
+        
+    def unlockdocumentbyref(self, ref):
+        obj = self.UnlockDocumentByRef(self.sessionTicket, ref)
+        ret = obj.post()
+        if ret != 200:
+            raise Exception(ret, obj.getResponseText())
+        
+    def createbatchpage(self, appid, batchname, data):
+        obj = self.CreateBatchPage(self.sessionTicket, self.dataSource, appid, batchname, data.toXML())
+        ret = obj.post()
+        if ret == 200:
+            print('success')
+        else:
+            raise Exception(ret, obj.getResponseText())
+
+    def uploadimagestream(self, data):
+        obj = self.UploadImageStream(self.sessionTicket, self.dataSource, data.toXML())
+        ret = obj.post()
+        if ret == 200:
+            return obj.getUploadKey()
+        else:
+            raise Exception(ret, obj.getResponseText())
+
+    def uploadfile(self, filename):
+        head, tail = os.path.split(filename)
+        file = open(filename, 'rb', self.buffer_size)
+        idx = 0
+        key = ''
+        while True:
+            print(key)
+            data = file.read(self.buffer_size)
+            if not data:
+                break
+            sdata = srv.AxStreamData(key, tail, data, idx * self.buffer_size)
+            key = srv.uploadimagestream(sdata)
+            idx = idx+1
+
+        return key
+
+    def indexDocByFolder(self, appid, dir, tpath, fpath):
+        failed = 0
+        first = True;
+        seq = 0;
+        for file in os.listdir(dir):
+            seq = seq + 1
+            filePath = str(dir)+'/' + str(file)
+            tgtPath = str(tpath) + '/' + str(file)
+            faildPath = str(fpath) + '/' + str(file)
+            if file.upper().endswith('.PDF'):
+                # t = datetime.datetime.now()
+                t = datetime.datetime.fromtimestamp(os.path.getmtime(filePath))
+                id = str(appid) + '_' + str(file).replace(' ', '_').replace('.','_').replace('(','').replace(')','') + '_' + str(t.strftime('%Y%m%d%H%M%S')) + '_'  + str(seq)
+                print("[START] "+ filePath + "," + id)
+                data = srv.AxDocCrtData(str(appid), self.dataSource, filePath)
+                idx = srv.QueryItem()
+                idx.addField(1, id, AxServices.false)
+                #idx.addField(2, t.strftime('%Y-%m-%d %H:%M:%S'), AxServices.false)
+                idx.addField(2, t.strftime('%m-%d-%Y'), AxServices.false)
+                try:
+                    ref = srv.createnewdocument(data, idx)
+                    srv.unlockdocumentbyref(ref)
+                    os.rename(filePath, tgtPath)
+                except Exception as e:
+                    os.rename(os.rename(filePath, failedPath))
+                    failed = failed + 1
+                print("[END] " + filePath)
+        print(str(seq) + " files processed, " + str(failed) + " failed.")
+        return seq, failed        
+                
+if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        print('Four Args, appid, source path, processed path, and failed path')
+        exit(-1)
+    appid = sys.argv[1]
+    spath = sys.argv[2]
+    tpath = sys.argv[3]
+    fpath = sys.argv[4]
+
+    failed = 0
+
+    try:
+        srv = AxServices()
+        ticket = srv.login(datasource, user, password)
+        processed, failed = srv.indexDocByFolder(appid, spath, tpath, fpath)
+        srv.logout()
+    
+        if failed &gt; 0:
+            failed = -1
+            raise Exception('400','login failed')
+    except Exception as e:
+      smtp = smtplib.SMTP('smtp.odu.edu')
+      smtp.sendmail('dba-dist@odu.edu','dba-dist@odu.edu','[BDM Automation]: '+ str(failed) + ' failed.')
+
+    # CreateNewDocument
+    # data = srv.AxDocCrtData('509', srv.dataSource, 'c:/bdm_file/test.pdf')
+    # idx = srv.QueryItem()
+    # import random
+    # idx.addField(1, str(random.randint(80000,90000)), AxServices.false)
+    # idx.addField(2, '45237', AxServices.false)
+    # idx.addField(3, 'REF4', AxServices.false)
+    # idx.addField(14, 'UI', AxServices.false)
+    # srv.createnewdocument(data, idx)
+
+    # CreateBatchPage
+    # data1 = srv.AxPageUploadData('c:/bdm_file/test.pdf')
+    # print(data1.toXML())
+    # data2 = srv.AxPageUploadData('c:/bdm_file/test.pdf')
+    # srv.createbatchpage( '509', 'batch1', data1)
+
+    # UploadImageStream
+    # filekey = srv.uploadfile('C:/Users/q1zhang/Downloads/test2.pdf')
+    # data = srv.AxDocCrtData('509', srv.dataSource, filekey)
+    # idx = srv.QueryItem()
+    # idx.addField(1, '78538', AxServices.false)
+    # idx.addField(2, '45237', AxServices.false)
+    # idx.addField(3, 'REF4', AxServices.false)
+    # idx.addField(14, 'UI', AxServices.false)
+    # srv.createnewdocument(data, idx)
+</pre>
+
+:ET

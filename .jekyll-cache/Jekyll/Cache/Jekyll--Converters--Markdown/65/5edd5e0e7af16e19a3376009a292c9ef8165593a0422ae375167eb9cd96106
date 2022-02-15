@@ -1,0 +1,69 @@
+I"g
+<p>Now, I am modifying my selenium test code for our banner application to add a function to send email out when a testcase failed.</p>
+
+<p>I found a code here, and did some changes<br />
+https://stackoverflow.com/questions/4414234/getting-pythons-unittest-results-in-a-teardown-method/4415062</p>
+
+<p>Add a new class to send message when the testcase fails.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
+from tools.config import config
+import base64
+
+class sendmail:
+    def __init__(self):
+        self.cf = config().getcf()
+
+    def send(self, msg):
+        self.send(msg, None)
+
+    def send(self, msg, pic):
+        try:
+            sender = self.cf.get('NOTICE', 'sender')
+            receivers = [self.cf.get('NOTICE', 'receivers')]
+            # message = MIMEText(msg, 'plain', 'utf-8')
+            message = MIMEMultipart()
+            message['From'] = Header('Selenium Test', 'utf-8')
+            message['To'] = Header('dba', 'utf-8')
+            subject = msg
+            message['Subject'] = Header(subject, 'utf-8')
+
+            if pic is not None:
+                img = MIMEText(base64.b64decode(pic), "base64", 'utf-8')
+                img["Content-Type"] = "application/octet-stream"
+                img["Content-Disposition"] = 'attachment; filename= "img.png"'
+                message.attach(img)
+
+            smtpObj = smtplib.SMTP('smtp.odu.edu')
+            smtpObj.sendmail(sender, receivers, message.as_string())
+        except smtplib.SMTPException:
+            print 'failed'
+</pre>
+
+<p>Override the tearDown function in the class which inherit unittest.TestCase</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+    def list2reason(self, exc_list):
+        if exc_list and exc_list[-1][0] is self:
+            return exc_list[-1][1]
+
+    def tearDown(self):
+        if hasattr(self, '_outcome'):  # Python 3.4+
+            result = self.defaultTestResult()  # these 2 methods have no side effects
+            self._feedErrorsToResult(result, self._outcome.errors)
+        else:  # Python 3.2 - 3.3 or 2.7
+            result = getattr(self, '_outcomeForDoCleanups', self._resultForDoCleanups)
+
+        error = self.list2reason(result.errors)
+        failure = self.list2reason(result.failures)
+
+        if error or failure:
+            typ, text = ('ERROR', error) if error else ('FAIL', failure)
+            msg = [x for x in text.split('\n')[1:] if not x.startswith(' ')][0]
+            ss = self.driver.get_screenshot_as_base64()
+            sendmail().send("%s at %s: [%s]" % (typ, self.id(), msg), ss)
+        else:
+            pass
+</pre>
+:ET

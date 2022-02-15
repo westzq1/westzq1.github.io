@@ -1,0 +1,90 @@
+I"<p>We modify the password of applications regularly, it is such a painful work every time. So I want to use Oracle Wallet instead of password in the configuration files.</p>
+
+<p>At first, I test with Tomcat:</p>
+
+<p>1.Copy 4 jar files from $ORACLE_HOME to $CATALINA_HOME/lib</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+ojdbc7.jar
+oraclepki.jar
+osdt_cert.jar
+osdt_core.jar
+</pre>
+
+<p>2.Create folders for tnsnames.ora and wallet.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+mkdir $CATALINA_HOME/network/admin
+mkdir $CATALINA_HOME/network/wallet
+</pre>
+
+<p>3.Create tnsnames.ora in $CATALINA_HOME/network/admin</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+$ cat $CATALINA_HOME/network/admin/tnsnames.ora
+PPRD3_INTEGMGR =
+  (DESCRIPTION =
+    (ADDRESS_LIST =
+      (ADDRESS = (PROTOCOL = TCP)(Host = xxx.pprd.xxx.edu)(Port = 2336))
+    )
+    (CONNECT_DATA =
+      (SID = PPRD)
+    )
+  )  
+
+PPRD3_SSOMGR =
+  (DESCRIPTION =
+    (ADDRESS_LIST =
+      (ADDRESS = (PROTOCOL = TCP)(Host = xxx.pprd.xxx.edu)(Port = 2336))
+    )
+    (CONNECT_DATA =
+      (SID = PPRD)
+    )
+  )  
+</pre>
+
+<p>4.Set the path of tnsnames.ora and wallet in bin/setenv.sh</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+export CATALINA_HOME=/l01/app/tomcat_8446
+export CATALINA_PORT=8446
+export JAVA_OPTS="-server -Xms2g -Xmx4g -Doracle.jdbc.autoCommitSpecCompliant=false -Dlog4j.configuration=config.properties -Doracle.net.tns_admin=${CATALINA_HOME}/network/admin -Doracle.net.wallet_location=${CATALINA_HOME}/network/wallet"
+CATALINA_PID="${CATALINA_HOME}/catalina${CATALINA_PORT}.pid"
+</pre>
+
+<p>5.Modify connect strings in conf/setenv.sh</p>
+<pre class="prettyprint lang-xml linenums=1 ">
+&lt;pre class="prettyprint lang-sh linenums=1 "&gt;
+     &lt;Resource name="jdbc/ssomgr_integmgr_banner" auth="Container" type="javax.sql.DataSource"
+       driverClassName="oracle.jdbc.OracleDriver"
+       url="jdbc:oracle:thin:@PPRD3_INTEGMGR"
+        initialSize="5" maxTotal="600" maxIdle="-1" maxWaitMillis="30000"
+        validationQuery="select 1 from dual"
+        accessToUnderlyingConnectionAllowed = "true"
+        removeAbandonedOnBorrow = "true"
+        testOnBorrow="true"/&gt;
+
+    &lt;Resource name="jdbc/ssomgr" auth="Container"
+        type="javax.sql.DataSource"
+        driverClassName="oracle.jdbc.OracleDriver"
+        url="jdbc:oracle:thin:@PPRD3_SSOMGR"
+        initialSize="5" maxTotal="600" maxIdle="-1" maxWaitMillis="30000"
+        validationQuery="select 1 from dual" 
+        accessToUnderlyingConnectionAllowed = "true"
+        removeAbandonedOnBorrow = "true"
+        testOnBorrow="true"/&gt;
+&lt;/pre&gt;
+</pre>
+
+<p>6.Create wallet on the other machine which has Oracle Client / Database installed.</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+echo &lt;WALLET PWD&gt; | mkstore -wrl /tmp/wallet -create
+echo &lt;WALLET PWD&gt; | mkstore -wrl /tmp/wallet -createCredential PPRD3_INTEGMGR INTEGMGR &lt;DB USER PWD&gt;
+echo &lt;WALLET PWD&gt; | mkstore -wrl /tmp/wallet -createCredential PPRD3_SSOMGR SSOMGR &lt;DB USER PWD&gt;
+</pre>
+
+<p>7.Copy the wallet to the Tomcat</p>
+
+<p>8.Exclude jar in the Tomcat Jar Filter, in conf/catalina.properties</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+tomcat.util.scan.StandardJarScanFilter.jarsToSkip=
+Add oraclepki.jar,osdt_cert.jar,osdt_core.jar at the end.
+</pre>
+
+:ET

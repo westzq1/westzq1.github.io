@@ -1,0 +1,79 @@
+I"x<p>Recently, I am working on to use SELENIUM for automating testing. <br />
+A part of my goal is to use SELENIUM for stress test<br />
+We want to simulate the registration process to make sure the course system could be working as expected at the next semester when students register their courses.</p>
+
+<p>I use ansible playbook to simplify the build of a selenium grid environment.</p>
+
+<p>The following packages are mandatory.</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+sudo apt install python-docker
+pip install docker-py
+pip uninstall requests 
+pip uninstall urllib3 
+pip install requests
+</pre>
+
+<p>The script creating a selenium grid: <br /> 
+selenium_grid.yml</p>
+<pre class="prettyprint linenums=1 ">
+---
+- hosts: localhost
+  connection: local
+  gather_facts: False
+  vars:
+    nodes: 10
+    state: started
+    dns: 192.168.100.153
+  tasks:
+    - name: "&#123;&#123; '%s hub' | format(state) &#125;&#125;"
+      docker_container:
+        name: hub
+        image: selenium/hub
+        state: "&#123;&#123; state &#125;&#125;"
+        published_ports: 5555:4444
+        recreate: yes
+        cleanup: yes
+        dns_servers: "&#123;&#123; dns &#125;&#125;"
+
+    - name: "&#123;&#123; '%s nodes' | format(state) &#125;&#125;"
+      docker_container:
+        name: "&#123;&#123; 'chrome%02d' | format(item) &#125;&#125;"
+        image: selenium/node-chrome-debug
+        state: "&#123;&#123; state &#125;&#125;"
+        published_ports: "&#123;&#123; '59%02d:5900' | format(item) &#125;&#125;"
+        recreate: yes
+        cleanup: yes
+        links: hub:hub
+        dns_servers: "&#123;&#123; dns &#125;&#125;"
+      loop: "&#123;&#123; range(1, nodes|int + 1, 1)|list &#125;&#125;"
+</pre>
+
+<pre class="prettyprint lang-sh linenums=1 ">
+$ ansible-playbook selenium_grid.yml 
+ [WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
+
+PLAY [localhost] *******************************************************************************************************************
+
+TASK [started hub] *****************************************************************************************************************
+changed: [localhost]
+
+TASK [started nodes] ***************************************************************************************************************
+changed: [localhost] =&gt; (item=1)
+changed: [localhost] =&gt; (item=2)
+changed: [localhost] =&gt; (item=3)
+changed: [localhost] =&gt; (item=4)
+changed: [localhost] =&gt; (item=5)
+changed: [localhost] =&gt; (item=6)
+changed: [localhost] =&gt; (item=7)
+changed: [localhost] =&gt; (item=8)
+changed: [localhost] =&gt; (item=9)
+changed: [localhost] =&gt; (item=10)
+
+PLAY RECAP *************************************************************************************************************************
+localhost                  : ok=2    changed=2    unreachable=0    failed=0   
+
+zhangqiaoc@ubuntu01:~/ansible$ sudo docker ps -a
+CONTAINER ID        IMAGE                        COMMAND                  CREATED              STATUS                     PORTS                    NAMES
+d4dd9291caf0        selenium/node-chrome-debug   "/opt/bin/entry_poin
+</pre>
+:ET

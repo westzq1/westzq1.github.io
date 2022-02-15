@@ -1,0 +1,340 @@
+I"†(<p>We can use Oracle database to do authentication by using Proxy User.</p>
+
+<p>After authentication, we should have a way to do authorization.</p>
+
+<p>Unfortunately, the proxy user can do any SELECT and DML on the objects of application user directly without any restriction.</p>
+
+<p>Proxy User can be granted a special role, but, the privileges on the role can just be on the objects of other schemas or system privileges. So at this time, we need to use VPD to archive our goal.</p>
+
+<p>The following is a demo, which is using HR example schema.</p>
+
+<p>If you donâ€™t have HR schema, go Github to clone:</p>
+<pre class="prettyprint lang-sh linenums=1 ">$ git clone --recursive https://github.com/oracle/oracle-db-examples.git</pre>
+
+<p>First, we need to create database user, for each user in HR.EMPLOYEES</p>
+<pre class="prettyprint lang-sql linenums=1 ">select 'create user '||email||' identified by '||email||';' from hr.employees;</pre>
+
+<p>Second, each user can be working as a proxy user to access the data in HR. No specific role or premission needs to be granted to proxy user.</p>
+<pre class="prettyprint lang-sql linenums=1 ">select 'alter user hr grant connect through '||email||';' from hr.employees;</pre>
+
+<p>Now, we can do test:</p>
+<pre class="prettyprint lang-sql linenums=1 ">$ sqlplus abull[hr]/ABULL@127.0.0.1/hr
+
+SQL*Plus: Release 18.0.0.0.0 - Production on Sun Dec 16 20:40:13 2018
+Version 18.3.0.0.0
+
+Copyright (c) 1982, 2018, Oracle.  All rights reserved.
+
+Last Successful login time: Sun Dec 16 2018 08:32:00 -05:00
+
+Connected to:
+Oracle Database 18c Enterprise Edition Release 18.0.0.0.0 - Production
+Version 18.3.0.0.0
+
+SQL&gt; select count(*) from hr.employees;
+
+  COUNT(*)
+----------
+       107
+</pre>
+
+<p>Next, I want to impose some rules on each user, to restrict them that they can only access themselves and their subordinate in HR.EMPLOYEES and HR.JOB_HISTORY.</p>
+
+<p>For example:</p>
+<ol>
+  <li>Steven King is the boss of the company, so he can access the record of everyone.</li>
+  <li>Neena Kochhar is a supervisor, he can access the records of his subordinate.</li>
+  <li>Alexis Bull is only an employees, so he can only access the records himself.</li>
+</ol>
+
+<p>First, we have to create an VPD admin user and a context</p>
+<pre class="prettyprint lang-sql linenums=1 ">CREATE OR REPLACE CONTEXT hr_ctx using hr_package;</pre>
+
+<p>Second, due to VPD cannot support CONNECT BY clause, 
+and also, I want to have a VPD policy on EMPLOYEES table which is the source I need to use to initial the context. 
+VPD has the problems for this recursive invoking also, so I replicate HR.EMPLOYEES to vpd_admin user by using mview.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+-- SYS, create VPD_ADMIN user for management
+create user vpd_admin identified by vpd_admin;
+grant unlimited tablespace to vpd_admin;
+grant create session, resource to vpd_admin;
+grant create any context to vpd_admin;
+grant all on hr.employees to vpd_admin;
+grant all on hr.MLOG$_EMPLOYEES to vpd_admin;
+grant create materialized view to vpd_admin;
+grant execute on DBMS_RLS to vpd_admin;
+
+-- VPD_ADMIN, create a context
+sqlplus vpd_admin/vpd_admin@127.0.0.1/hr
+CREATE OR REPLACE CONTEXT hr_ctx using hr_package;
+
+-- HR, create mview log for replication
+create materialized view log on employees with primary key; 
+
+-- VPD_ADMIN, create mview log. The application user cannot access this tables, so, they cannot get all data of employees.
+create materialized view hr_employees refresh fast as select * from hr.employees;
+
+-- create HR_PACKAGE to set CONTEXT and for VPD
+CREATE OR REPLACE PACKAGE hr_package IS
+PROCEDURE set_hr_context;
+FUNCTION get_hr_context return varchar;
+FUNCTION vpd_control(schema_p in varchar2, table_p in varchar2) return varchar2;
+type NUMBER_ARRAY is table of number;
+Function get_subordinate_emp_id return NUMBER_ARRAY PIPELINED;
+type employees_type is record(email varchar2(25), emp_id number(6));
+type employees_table is table of employees_type;
+END;
+/
+
+CREATE OR REPLACE PACKAGE BODY hr_package AS
+-- set EMP_ID in HR_CTX. If login user is SYS/SYSTEM/HR, set to 0, if not the application user, set to -1
+PROCEDURE set_hr_context
+IS
+  chk_cnt number;
+  emp_id number;
+BEGIN
+  select count(*) into chk_cnt from hr_employees where email = SYS_CONTEXT('USERENV','PROXY_USER');
+  if chk_cnt &gt; 0 then
+ 		select employee_id into emp_id
+ 		  from hr_employees where email = SYS_CONTEXT('USERENV','PROXY_USER');
+ 		DBMS_SESSION.SET_CONTEXT('hr_ctx','EMP_ID',emp_id);
+  elsif SYS_CONTEXT('USERENV','SESSION_USER') in ('SYS','SYSTEM','HR') then
+    DBMS_SESSION.SET_CONTEXT('hr_ctx','EMP_ID',0);
+  else
+    DBMS_SESSION.SET_CONTEXT('hr_ctx','EMP_ID',-1);
+  end if;
+END;
+
+-- this is a table function, used for VPD
+Function get_subordinate_emp_id 
+return NUMBER_ARRAY
+PIPELINED 
+is 
+	cursor c1 is
+	  select employee_id from hr_employees 
+	 connect by manager_id =  prior employee_id
+	   start with employee_id = SYS_CONTEXT('hr_ctx','EMP_ID');
+	emp_id number;   
+begin
+	open c1;
+	loop
+	  fetch c1 into emp_id;
+	   exit when c1%notfound;
+	  pipe row(emp_id);
+  end loop;
+end;
+
+FUNCTION get_hr_context 
+return varchar
+IS
+  curr_context varchar2(2000);
+begin
+  SELECT 'EMP_ID:'||SYS_CONTEXT ('hr_ctx', 'EMP_ID') into curr_context FROM DUAL;
+  return curr_context;
+end;
+
+-- for VPD
+-- if the login user is SYSTEM/SYS/HR, then it can access all data.
+-- if the login user is an application user, it can access the data they are allowed to access.
+-- if the login user is not anyone above, it cannot access any data
+FUNCTION vpd_control(schema_p in varchar2, table_p in varchar2) 
+return varchar2
+is
+  emp_id number;
+  pred varchar2(400);
+begin
+	if schema_p = 'HR' then
+  	emp_id := SYS_CONTEXT('hr_ctx','EMP_ID');
+  	if emp_id &lt; 0 then
+    	pred := ' 1 = 2 ';
+  	elsif emp_id = 0 then
+    	pred := '';
+ 		else 
+    	--if table_p = 'EMPLOYEES' then
+    	--	pred := 'employee_id in (select COLUMN_VALUE from table(system.hr_package.get_subordinate_emp_id))';
+  		--elsif table_p = 'JOB_HISTORY' then
+  		--  pred := 'employee_id in (select COLUMN_VALUE from table(system.hr_package.get_subordinate_emp_id))';
+  		--end if;
+  		pred := 'employee_id in (select COLUMN_VALUE from table(vpd_admin.hr_package.get_subordinate_emp_id))';
+  	end if;
+  else 
+    pred := ' 1 = 2 ';
+  end if;
+  return pred;
+end;
+end;
+/
+
+grant execute on vpd_admin.hr_package to hr;
+</pre>
+<p>Next, before we create the VPD policy, we do test in advance.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+$ sqlplus abull[hr]/ABULL@127.0.0.1/hr
+
+-- the normal user cannot call SET_CONTEXT to change the EMP_ID to elevate the permission
+SQL&gt; exec DBMS_SESSION.SET_CONTEXT('hr_ctx','EMP_ID',11111);
+BEGIN DBMS_SESSION.SET_CONTEXT('hr_ctx','EMP_ID',11111); END;
+
+*
+ERROR at line 1:
+ORA-01031: insufficient privileges
+ORA-06512: at "SYS.DBMS_SESSION", line 152
+ORA-06512: at line 1
+
+SQL&gt;desc vpd_admin.hr_employees 
+ERROR:
+ORA-04043: object vpd_admin.hr_employees does not exist
+
+SQL&gt; exec vpd_admin.hr_package.set_hr_context;
+
+PL/SQL procedure successfully completed.
+
+SQL&gt; select vpd_admin.hr_package.get_hr_context from dual;
+
+GET_HR_CONTEXT
+--------------------------------------------------------------------------------
+EMP_ID:185
+
+SQL&gt; select vpd_admin.hr_package.vpd_control('HR','EMPLOYEES') from dual;
+
+VPD_ADMIN.HR_PACKAGE.VPD_CONTROL('HR','EMPLOYEES')
+--------------------------------------------------------------------------------
+employee_id in (select COLUMN_VALUE from table(system.hr_package.get_subordinate
+_emp_id))
+
+
+SQL&gt; select count(*) from table(vpd_admin.hr_package.get_subordinate_emp_id);
+
+  COUNT(*)
+----------
+	 1
+
+$ sqlplus system/oracle@127.0.0.1/hr
+
+SQL&gt; exec vpd_admin.hr_package.set_hr_context;
+
+PL/SQL procedure successfully completed.
+
+SQL&gt; select vpd_admin.hr_package.get_hr_context from dual;
+
+GET_HR_CONTEXT
+--------------------------------------------------------------------------------
+EMP_ID:0
+
+SQL&gt; select vpd_admin.hr_package.vpd_control('HR','EMPLOYEES') from dual;
+
+VPD_ADMIN.HR_PACKAGE.VPD_CONTROL('HR','EMPLOYEES')
+--------------------------------------------------------------------------------
+
+</pre>
+<p>Next, we can add VPD policy:</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+BEGIN
+DBMS_RLS.ADD_POLICY (
+ object_schema    =&gt; 'HR',
+ object_name      =&gt; 'EMPLOYEES',
+ policy_name      =&gt; 'HR_EMPLOYEES_POLICY',
+ function_schema  =&gt; 'VPD_ADMIN',
+ policy_function  =&gt; 'HR_PACKAGE.vpd_control',
+ -- statement_types  =&gt; 'select',
+ policy_type      =&gt; DBMS_RLS.CONTEXT_SENSITIVE);
+END;
+/
+
+BEGIN
+DBMS_RLS.ADD_POLICY (
+ object_schema    =&gt; 'HR',
+ object_name      =&gt; 'JOB_HISTORY',
+ policy_name      =&gt; 'HR_JOB_HISTORY_POLICY',
+ function_schema  =&gt; 'VPD_ADMIN',
+ policy_function  =&gt; 'HR_PACKAGE.vpd_control',
+ -- statement_types  =&gt; 'select',
+ policy_type      =&gt; DBMS_RLS.CONTEXT_SENSITIVE);
+END;
+/
+</pre>
+<p>Then, do some test</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+-- SYSTEM, can see all data.
+SQL&gt; exec vpd_admin.hr_package.set_hr_context;
+
+PL/SQL procedure successfully completed.
+
+SQL&gt; select count(*) from hr.employees;
+
+  COUNT(*)
+----------
+       107
+
+SQL&gt; select count(*) from hr.job_history;
+
+  COUNT(*)
+----------
+	10
+	
+-- HR, can see all data
+SQL&gt; select count(*) from employees;
+
+  COUNT(*)
+----------
+       107
+
+SQL&gt; select count(*) from job_history;
+
+  COUNT(*)
+----------
+	10
+	
+-- SKING, BOSS, can see all data
+SQL&gt; select count(*) from employees;
+
+  COUNT(*)
+----------
+       107
+
+SQL&gt; select count(*) from job_history;
+
+  COUNT(*)
+----------
+	10
+
+-- NKochhar, a supervisor, can only see the records he is allowed 
+SQL&gt; select count(*) from employees;
+
+  COUNT(*)
+----------
+	12
+
+SQL&gt; select count(*) from job_history;
+
+  COUNT(*)
+----------
+	 4
+
+-- ABULL, an employee, can only see himself.
+SQL&gt; select count(*) from employees;
+
+  COUNT(*)
+----------
+	 1
+
+SQL&gt; select count(*) from job_history;
+
+  COUNT(*)
+----------
+	 0
+</pre>
+
+<p>Finally, we need to have a way to set CONTEXT automatically, we can use logon trigger.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+-- SYS
+CREATE OR REPLACE TRIGGER trig_set_client_info 
+  AFTER LOGON ON database
+DECLARE
+BEGIN
+   DBMS_SESSION.SET_IDENTIFIER(SYS_CONTEXT('USERENV','PROXY_USER'));
+   vpd_admin.hr_package.set_hr_context;
+END;
+/
+</pre>
+:ET

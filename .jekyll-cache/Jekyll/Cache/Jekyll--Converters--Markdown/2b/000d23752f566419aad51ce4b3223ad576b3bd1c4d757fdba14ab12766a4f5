@@ -1,0 +1,204 @@
+I""<p>Recently, I am focusing on dealing with the vulnerabilities which found by a security scan.
+Most of them are related with Web Server, especially with Tomcat.
+I will record how to verify and fix the these vulnerabilities.</p>
+
+<p><span style="color:#ff0000;"><strong>Expired/Untrusted/Self-signed Certificate:
+</strong></span></p>
+
+<p><strong>Verify:</strong></p>
+<pre class="prettyprint lang-sql linenums=1 ">
+$ openssl s_client -connect localhost:7004
+CONNECTED(00000003)
+depth=0 C = US, ST = VA, L = VVV, O = xxx, OU = yyy, CN = zzz.prod.xxx.edu
+--&gt;&gt; verify error:num=18:<span style="color:#ff0000;">self signed certificate</span>
+verify return:1
+depth=0 C = US, ST = VA, L = VVV, O = xxx, OU = yyy, CN = zzz.prod.xxx.edu
+--&gt;&gt; verify error:num=10:<span style="color:#ff0000;">certificate has expired</span>
+--&gt;&gt; <span style="color:#ff0000;">notAfter=Mar 29 12:45:03 2017 GMT</span>
+verify return:1
+depth=0 C = US, ST = VA, L = VVV, O = xxx, OU = yyy, CN = zzz.prod.xxx.edu
+notAfter=Mar 29 12:45:03 2017 GMT
+verify return:1
+
+………
+
+No client certificate CA names sent
+---
+SSL handshake has read 1052 bytes and written 589 bytes
+---
+New, TLSv1/SSLv3, Cipher is AES128-SHA
+Server public key is 2048 bit
+Secure Renegotiation IS supported
+Compression: NONE
+Expansion: NONE
+SSL-Session:
+Protocol : TLSv1.2
+Cipher : AES128-SHA
+Session-ID: xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Session-ID-ctx:
+Master-Key: xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Key-Arg : None
+Krb5 Principal: None
+PSK identity: None
+PSK identity hint: None
+Start Time: 1544020132
+Timeout : 300 (sec)
+--&gt;&gt; Verify return code: 10 (<span style="color:#ff0000;">certificate has expired</span>)
+---
+read:errno=0
+</pre>
+
+<p><strong>Fix:</strong></p>
+
+<p>Generate a request, the password of the old keystore is needed. <br />
+Normally, the password is on Tomcat server.xml, if cannot find, create a new one instead.</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+$ keytool -genkey -alias tara -keyalg RSA -keysize 2048 -keystore ./tara
+$ keytool -certreq -alias tara -keyalg RSA -file ./tara.csr -keystore ./.keystore -ext SAN=dns:tara.pprd.yyy.edu
+</pre>
+
+<p>Send the content in tara.csr to CA to sign</p>
+
+<p>After get the feedback from CA, download tara.cer and import</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+$ keytool -import -alias tara -file tara.cer -keystore ./.keystore
+</pre>
+
+<p>If recreate keystore, the new name / password should be changed on server.xml</p>
+
+<p><span style="color:#ff0000;"><strong>Weak Cipher suite</strong></span></p>
+
+<p><strong>Verify:</strong><br />
+Do it from a windows client</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+&gt;nmap -sV --script ssl-enum-ciphers -p 7004 128.82.96.201
+Starting Nmap 7.70 ( https://nmap.org ) at 2018-12-05 09:26 Eastern Standard Time
+Nmap scan report for homer.prod.odu.edu (128.82.96.201)
+Host is up (0.0010s latency).
+
+……...
+
+| ssl-enum-ciphers:
+| TLSv1.2:
+| ciphers:
+<span style="color:#ff0000;">| TLS_RSA_WITH_3DES_EDE_CBC_SHA (rsa 2048) - C</span>
+<span style="color:#ff0000;">| TLS_RSA_WITH_AES_128_CBC_SHA (rsa 2048) - A</span>
+| compressors:
+| NULL
+| cipher preference: client
+| warnings:
+<span style="color:#ff0000;">| 64-bit block cipher 3DES vulnerable to SWEET32 attack</span>
+|_ least strength: C
+
+……
+</pre>
+<p>Or, use openssl, when we use MEDIUM, it should be not working, only HIGH can be accepted</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+<strong>$ openssl s_client -connect 127.0.0.1:4903 <span style="color:#ff0000;">-cipher MEDIUM</span></strong>
+CONNECTED(00000003)
+139781540525968:error:14077410:SSL routines:SSL23_GET_SERVER_HELLO:sslv3 alert handshake failure:s23_clnt.c:769:
+---
+no peer certificate available
+---
+No client certificate CA names sent
+---
+SSL handshake has read 7 bytes and written 171 bytes
+---
+New, (NONE), Cipher is (NONE)
+<span style="color:#ff0000;">Secure Renegotiation IS NOT supported</span>
+Compression: NONE
+Expansion: NONE
+No ALPN negotiated
+SSL-Session:
+Protocol : TLSv1.2
+Cipher : 0000
+Session-ID:
+Session-ID-ctx:
+Master-Key:
+Key-Arg : None
+Krb5 Principal: None
+PSK identity: None
+PSK identity hint: None
+Start Time: 1544157174
+Timeout : 300 (sec)
+Verify return code: 0 (ok)
+---
+</pre>
+<p>Or, we can use the following script:</p>
+
+<pre class="prettyprint lang-sh linenums=1 ">
+#!/usr/bin/env bash
+
+# OpenSSL requires the port number.
+SERVER=$1
+DELAY=1
+ciphers=$(openssl ciphers 'ALL:eNULL' | sed -e 's/:/ /g')
+
+echo Obtaining cipher list from $(openssl version).
+
+for cipher in ${ciphers[@]}
+do
+echo -n Testing $cipher...
+result=$(echo -n | openssl s_client -cipher "$cipher" -connect $SERVER 2&gt;&amp;1)
+if [[ "$result" =~ ":error:" ]] ; then
+error=$(echo -n $result | cut -d':' -f6)
+echo NO \($error\)
+else
+if [[ "$result" =~ "Cipher is ${cipher}" || "$result" =~ "Cipher :" ]] ; then
+echo YES
+else
+echo UNKNOWN RESPONSE
+echo $result
+fi
+fi
+sleep $DELAY
+done
+</pre>
+
+<p>Unfortunately, not every cipher suite you are using can be listed.</p>
+
+<p><strong>Fix:</strong></p>
+
+<p>Remove motioned cipher suites from server.xml for specific connector<br />
+Do it on the test machine at first to make sure the client can still access the web server.<br />
+The cipher suites which Tomcat supports are determinded by JAVA. It would be better to use update-to-date JDK</p>
+
+<p><span style="color:#ff0000;"><strong>TLS1.0 / 1.1 / SSLv3 is supported</strong></span></p>
+
+<p><strong>Verfiy</strong>: <br />
+if not supported, you can see the following information, otherwise, like the verify in “Expired/Untrusted/Self-signed Certificate:”</p>
+
+<pre class="prettyprint lang-sql linenums=1 ">
+<strong>$ openssl s_client -connect localhost:8441 -tls1_1</strong>
+CONNECTED(00000003)
+140204650911560:error:1408F10B:SSL routines:SSL3_GET_RECORD:wrong version number:s3_pkt.c:339:
+---
+no peer certificate available
+---
+No client certificate CA names sent
+---
+SSL handshake has read 5 bytes and written 7 bytes
+---
+New, (NONE), Cipher is (NONE)
+--&gt;&gt; <span style="color:#ff0000;">Secure Renegotiation IS NOT supported</span> &lt;&lt;--
+Compression: NONE
+Expansion: NONE
+SSL-Session:
+Protocol : TLSv1.1
+Cipher : 0000
+Session-ID:
+Session-ID-ctx:
+Master-Key:
+Key-Arg : None
+Krb5 Principal: None
+PSK identity: None
+PSK identity hint: None
+Start Time: 1544026583
+Timeout : 7200 (sec)
+Verify return code: 0 (ok)
+---
+</pre>
+
+<p><strong>Fix:</strong><br />
+Specify sslProtocol=”TLSv1.2” for connector in server.xml of Tomcat.</p>
+:ET

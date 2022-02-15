@@ -1,0 +1,20 @@
+I"�<p>Before install RabbitMQ, we should install ERLANG which is the language used to code RabbitMQ. <br /></p>
+
+<p>We should be careful the compatibility between ERLANG and RabbitMQ. <br />
+https://www.rabbitmq.com/which-erlang.html#compatibility-matrix</p>
+
+<p>If you encounter this kind of error</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+{"init terminating in do_boot",{undef,[{rabbit_prelaunch,start,[],[]},{init,start_em,1,[]},{init,do_boot,3,[]}]}}
+
+Crash dump is being written to: /var/log/rabbitmq/erl_crash.dump...done
+init terminating in do_boot ()
+</pre>
+
+<p>You should check whether your erlang and rabbitmq are fit.<br /></p>
+
+<p>The rpm of ERLANG can be downloaded here, find the version you need. <br />
+https://dl.bintray.com/rabbitmq-erlang/rpm/erlang/</p>
+
+<p>The error information in “journalctl” is a misunderstanding, we can use “/usr/sbin/rabbitmq-server” to start RabbitMQ to see the internal errors.</p>
+:ET

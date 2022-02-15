@@ -1,0 +1,38 @@
+I"z<p>I have an artile about Application Failover<br />
+https://westzq1.github.io/oracle/2019/02/04/Application-Failover-1.html</p>
+
+<p>But I didn’t have any test about the how TAF&amp;FCF work with DBLINK</p>
+
+<p>Today, I find an doc about this:
+Database Link: DBLink Creation using TAF or SCAN TNS Connect String (Doc ID 399453.1)</p>
+
+<p>The key points are:</p>
+<ol>
+  <li>Database links do not support Transparent Application Failover.</li>
+  <li>Configuring a dblink using a SCAN listener address in the TNS connect descriptor is not recommended.</li>
+  <li>A DBLink connection is more reliable using a local listener(VIP)</li>
+</ol>
+
+<p>I tested wit FCF also in 11.2.0.4 and 18.3.0.0, it is also not working with DBLINK, like TAF.</p>
+
+<p>But with FAILOVER=ON attribute in TNS, at least the connection can reconnect to another node with retry.</p>
+
+<pre class="prettyprint lang-sql linenums=1 ">
+SQL&gt; select instance_number from v$instance@to_o11204_taf
+  2  ;
+
+INSTANCE_NUMBER
+---------------
+	      1
+
+-- kill instance 1
+SQL&gt; /
+
+INSTANCE_NUMBER
+---------------
+	      2
+</pre>
+
+<p>AC also is tested and not working with DBLINK.</p>
+
+:ET

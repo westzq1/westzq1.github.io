@@ -1,0 +1,581 @@
+I"_W<p>Many DBAs may never pay attentions on this topic. I talked with some of my friends about how to make the application failover smoothly, the answer is TAF.</p>
+
+<p>Actually, TAF is a failover mechanism for type 2 driver, like OCI. It is not working on JDBC Thin which is a type 4 driver.</p>
+
+<p>Now, I want to talk a little bit about this TOPIC on RAC</p>
+
+<p>There are four goals of failover:</p>
+<ol>
+  <li>a connect strings, can connect to alive node without any change.</li>
+  <li>a way to reconnect automatically.</li>
+  <li>a method to detect the node failure ASAP.</li>
+  <li>a way to handle uncommit transaction after reconnect to alive nodes.</li>
+</ol>
+
+<p>For the first goal, we have at least the following three ways:</p>
+<ol>
+  <li>use DNS, but how DNS know the node/database failure is a little hard to archive.</li>
+  <li>put the IP addresses of all instances into connection strings.</li>
+  <li>use scan-ip after 11.2</li>
+</ol>
+
+<p>I don’t want to talk method 1, it is uncommon with Oracle RAC. 
+The following is the configuration of method 2 and 3.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+orcl-vip = 
+(DESCRIPTION= 
+  (FAILOVER=on) 
+  (ADDRESS_LIST= 
+    (LOAD_BALANCE=off)(CONNECT_TIMEOUT=3)(RETRY_COUNT=3) 
+    (ADDRESS=(PROTOCOL=TCP)(HOST=database01-vip)(PORT=1521))
+    (ADDRESS=(PROTOCOL=TCP)(HOST=database02-vip)(PORT=1521))
+  )
+  (CONNECT_DATA=(SERVICE_NAME=orcl))
+)
+-- or
+orcl-scan = 
+(DESCRIPTION= 
+  (FAILOVER=on) 
+  (ADDRESS_LIST= 
+    (LOAD_BALANCE=on)(CONNECT_TIMEOUT=3)(RETRY_COUNT=3) 
+    (ADDRESS=(PROTOCOL=TCP)(HOST=rac-scan.rac.database.zhangqiaoc.com)(PORT=1521))
+  )
+  (CONNECT_DATA=(SERVICE_NAME=orcl))
+)
+</pre>
+
+<p>Be aware, FAILOVER here is not TAF, it means if the first IP is not available, try next. It is ON by default. If set FAILOVER and LOAD_BALANCE to OFF, if the first IP is not available, a error will be reported:</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+$ sqlplus system/oracle@orcl-vip
+
+SQL*Plus: Release 18.0.0.0.0 - Production on Mon Feb 4 15:15:51 2019
+Version 18.3.0.0.0
+
+Copyright (c) 1982, 2018, Oracle.  All rights reserved.
+
+ERROR:
+ORA-12514: TNS:listener does not currently know of service requested in connect
+descriptor
+</pre>
+
+<p>Now, our fisrt goal is accomplished. <br />
+Next, how to reconnect to survive nodes without intervention or application try.</p>
+
+<p>There are three ways:</p>
+<ol>
+  <li>TAF (transparent Application Failover), is for type 2 drivers, such of OCI, JDBC OCI, and .NET except ODP.</li>
+  <li>FCF (Fast Connection Failover), is for type 4 drivers, such of JDBC Thin, ODP.net, but it is also working for OCI.</li>
+</ol>
+
+<p>For TAF, both client side and server side are available.<br />
+The connection strings “orcl-vip” I used above is not client TAF on, so, after the fail of the instance 1</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+SQL&gt; select instance_number from v$instance;
+
+INSTANCE_NUMBER
+---------------
+	      1
+
+-- after shutdown node 2
+SQL&gt; /
+select instance_number from v$instance
+*
+ERROR at line 1:
+ORA-03135: connection lost contact
+Process ID: 1099
+Session ID: 25 Serial number: 48031
+
+
+SQL&gt; /
+ERROR:
+ORA-03114: not connected to ORACLE
+</pre>
+
+<p>We turn client TAF on by using FAILOVER_MODE:</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+orcl-vip = 
+(DESCRIPTION=
+  (FAILOVER=on)
+  (ADDRESS_LIST= 
+    (LOAD_BALANCE=on)(CONNECT_TIMEOUT=3)(RETRY_COUNT=3) 
+    (ADDRESS=(PROTOCOL=TCP)(HOST=database01-vip.database.zhangqiaoc.com)(PORT=1521))
+    (ADDRESS=(PROTOCOL=TCP)(HOST=database02-vip.database.zhangqiaoc.com)(PORT=1521))
+  )
+  (CONNECT_DATA=(SERVICE_NAME=orcl)
+                (FAILOVER_MODE = (TYPE=SELECT)(METHOD=BASIC))
+  )
+)
+</pre>
+
+<pre class="prettyprint lang-sql linenums=1 ">
+SQL&gt; select instance_number from v$instance;
+
+INSTANCE_NUMBER
+---------------
+	      1
+
+-- after shutdown node 2
+SQL&gt; /
+
+INSTANCE_NUMBER
+---------------
+	      2
+</pre>
+
+<p>TAF server side, should use a new created service name to connect.<br /></p>
+<pre class="prettyprint lang-sql linenums=1 ">
+$ srvctl add service -d orcl -s taf -r orcl1,orcl2 -e select -m basic -w 10 -z 150
+$ srvctl start service -d orcl -s taf
+</pre>
+<p>For JDBC Thin mode, we need to use FCF. FCF doesn’t work with a service which TAF is on, so we need to create a separate service for FCF which TAF is off.<br /></p>
+<pre class="prettyprint lang-sql linenums=1 ">
+$ srvctl add service -d orcl -s fcf -r orcl1,orcl2 -e none -m none -w 0 -z 0
+$ srvctl start service -d orcl -s fcf
+</pre>
+<p>When we enable server side TAF / FCF, the connection string should be the same as STEP 1, which is client TAF disabled.</p>
+
+<p>Next, we needs a way to notify the application when the node is out of work ASAP.</p>
+
+<p>Oracle affords FAN(Fast Application Notification) for this, and a lot of clients has integrated FAN with:</p>
+<ol>
+  <li>OCI Session Pools</li>
+  <li>Universal Connection Pool for JAVA</li>
+  <li>Thin JDBC Driver (12.2 and later)</li>
+  <li>ODP.NET managed and unmanaged providers.</li>
+  <li>All Weblogic Server data sources, and Oracle Tuxedo.</li>
+  <li>PHP</li>
+  <li>Global Data Services</li>
+  <li>Data Guard Broker</li>
+  <li>OEM</li>
+  <li>Tomcat / Websphere with UCP</li>
+</ol>
+
+<p>Let’s first take a look at how the FAN works when the nodes down.</p>
+
+<p>When the FAN is not properly configured, the session cannot break the following “select” due to there is no further data communication. 
+After I shut down the host 2 by killing SMON, the sqlplus session is still there until I kill it directly after two hours.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+[2/5/2019 11:58:02 AM] INSTANCE_NUMBER
+[2/5/2019 11:58:02 AM] ---------------
+[2/5/2019 11:58:02 AM] 	      2
+[2/5/2019 11:58:02 AM] 
+[2/5/2019 11:58:04 AM] SQL&gt; 
+[2/5/2019 11:58:04 AM] SQL&gt; 
+[2/5/2019 11:58:25 AM] SQL&gt; select count(*) from dba_objects, dba_objects;
+                       -- shutdown node 2 
+[2/5/2019 1:50:00 PM] 
+[2/5/2019 1:50:00 PM] 
+[2/5/2019 1:59:59 PM] 
+[2/5/2019 1:59:59 PM] 
+[2/5/2019 1:59:59 PM] 
+                      -- after 2.5 hours
+[2/5/2019 2:33:33 PM] Killed
+</pre>
+
+<p>After I set up FAN for SQLPLUS:</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+$ srvctl modify service -d orcl -s  taf -notification true
+</pre>
+
+<p>SQLPLUS can break the connection and reconnect to alive node almost 30 seconds.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+[2/5/2019 2:49:46 PM] INSTANCE_NUMBER
+[2/5/2019 2:49:46 PM] ---------------
+[2/5/2019 2:49:46 PM] 	      2
+[2/5/2019 2:49:46 PM] 
+[2/5/2019 2:50:12 PM] SQL&gt; select count(*) from dba_objects, dba_objects;
+                      -- shutdown node 2
+[2/5/2019 2:50:49 PM] 
+[2/5/2019 2:50:49 PM] 
+                      -- only after 30 seconds
+[2/5/2019 2:51:18 PM] select count(*) from dba_objects, dba_objects
+[2/5/2019 2:51:18 PM] *
+[2/5/2019 2:51:18 PM] ERROR at line 1:
+[2/5/2019 2:51:18 PM] ORA-25408: can not safely replay call
+</pre>
+
+<p>On this example, ORA-25408 is reported, it is an expected error.
+If we want to SELECT failover, we should set the failover_mode to SELECT</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+$ srvctl modify service -d orcl -s taf -e select
+</pre>
+
+<p>FAN is only a set of defined event, so, there are some mechanism to send out the event of node down, database down, and etc.</p>
+
+<p>Two method for this:</p>
+<ol>
+  <li>AQ HA notification, for OCI and ODP.NET unmanaged client before 12.1</li>
+  <li>ONS(Oracle Notification Service), for JDBC, and OCI and ODP.NET after 12.1</li>
+</ol>
+
+<p>The followed graphic shows that the mechanisms the different drivers use in 10,11,and 12.
+<img class="alignnone size-full wp-image-187" src="/images/20190204.1.png" alt="Capture" width="591" height="280" /><br />
+Fast Application Notification (FAN) Includes fanWatcher: A utility to subscribe to ONS and view FAN events<br />
+https://www.oracle.com/technetwork/database/options/clustering/applicationcontinuity/learnmore/fastapplicationnotification12c-2538999.pdf</p>
+
+<p>With the installation of GRID, we only need to create a dynamic service for clients. <br />
+Nothing needed to be set on the server side, except for OCI and ODP.NET<br />
+The notification attribute of the service has to be set to TRUE for them.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+$ srvctl modify service -d orcl -s  taf -notification true
+</pre>
+
+<p>But for the client side, it is extremely complicated.
+You can read the following document to figure out how to set up:<br /></p>
+<ol>
+  <li>Fast Application Notification (FAN) Includes fanWatcher: A utility to subscribe to ONS and view FAN events<br /></li>
+  <li>Client Failover Best Practices for Highly Available Oracle Databases Oracle Database 12c <br /></li>
+  <li>Client Failover Best Practices for Highly Available Oracle Databases: Oracle Database 11g Release 2</li>
+</ol>
+
+<p>For example:<br />
+JDBC with UCP</p>
+<ol>
+  <li>code
+    <pre class="prettyprint lang-java linenums=1 ">
+ pds = PoolDataSourceFactory.getPoolDataSource();
+ pds.setConnectionPoolName("FCFSamplePool");
+ pds.setFastConnectionFailoverEnabled(true);
+ // pds.setONSConfiguration("propertiesfile=/usr/ons/ons.properties");
+ Properties prop = new Properties();
+ prop.put(oracle.net.ns.SQLnetDef.TCP_CONNTIMEOUT_STR, ""+3000); // 3000ms
+ prop.put("oracle.jdbc.thinForceDNSLoadBalancing","true");
+ pds.setConnectionProperties(prop);
+ pds.setConnectionFactoryClassName("oracle.jdbc.pool.OracleDataSource");
+ pds.setUser("system");
+ pds.setPassword("oracle");
+ pds.setURL("jdbc:oracle:thin@((CONNECT_TIMEOUT=4)(RETRY_COUNT=30)(RETRY_DELAY=3) "+
+ " (ADDRESS_LIST = "+
+ " (LOAD_BALANCE=on) "+
+ " ( ADDRESS = (PROTOCOL = TCP)(HOST=RAC-SCAN)(PORT=1521))) "+
+ " (ADDRESS_LIST = "+
+ " (LOAD_BALANCE=on) "+
+ "( ADDRESS = (PROTOCOL = TCP)(HOST=DG-SCAN)(PORT=1521)))"+
+ "(CONNECT_DATA=(SERVICE_NAME=service_name)))");
+ </pre>
+  </li>
+  <li>jar
+ons.jar, ucp.jar ,and the jdbc driver jar file should in the CLASSPATH</li>
+</ol>
+
+<p>Now, we know what is TAF, FCF, FAN, and ONS, and our application can survive from the node / instance failure. 
+But there is still a lot of side effect of failover we should be dealing with.
+for example: the nls setting is not the same if we don’t implement callback function.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+INSTANCE_NUMBER
+---------------
+	      2
+
+SQL&gt; alter session set nls_date_format = 'yyyymmdd hh24miss';
+
+Session altered.
+
+SQL&gt; select sysdate from dual;
+
+SYSDATE
+---------------
+20190208 160028
+
+-- kill the instance 2
+
+SQL&gt; /
+
+SYSDATE
+---------------
+08-FEB-19
+</pre>
+
+<p>And, the transaction have to be rollback after failover.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+
+INSTANCE_NUMBER
+---------------
+	      1
+
+SQL&gt; truncate table test1;        
+
+Table truncated.
+
+SQL&gt; select * from test1;
+
+no rows selected
+
+SQL&gt; insert into test1 values(1);
+
+1 row created.
+
+-- shutdown abort instance 1;
+
+SQL&gt; @i.sql
+select instance_number from v$instance
+            *
+ERROR at line 1:
+ORA-25402: transaction must roll back
+
+
+SQL&gt; rollback;
+
+Rollback complete.
+
+SQL&gt; @i.sql
+
+INSTANCE_NUMBER
+---------------
+	      2
+</pre>
+
+<p>From 12.1, Oracle affords Application Continuity to handle callback automatically and transaction failover. <br />
+For 12.1, AC is only supported on Java, from 12.2, AC can be used on OCI, ODP.net</p>
+
+<p>How to enable Application Continuity on Service?<br />
+-failovertype transaction – AC <br />
+-commit_outcome TRUE      – TG <br /></p>
+<pre class="prettyprint lang-sql linenums=1 ">
+srvctl add service -d orcl -pdb hr -s ac -failovertype transaction -failovermethod basic \
+                                         -commit_outcome TRUE -preferred orcl1,orcl2
+</pre>
+<p>And, the REMOTE_LISTENER setting for the database must include the addresses in the ADDRESS_LISTs for all URL used for client connection, SCAN or VIPs</p>
+
+<p>Application Continuity has to be enabled with Transaction Guard which I will take it later.</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+[oracle@database01 ~]$ srvctl modify service -d orcl -pdb hr -s ac -failovertype select -failovermethod basic -commit_outcome TRUE
+[oracle@database01 ~]$ srvctl modify service -d orcl -pdb hr -s ac -failovertype transaction  -failovermethod basic -commit_outcome FALSE
+PRCD-1083 : Failed to modify service ac
+PRCD-1271 : Failed to unset commit outcome because the failover type is set to TRANSACTION
+</pre>
+
+<p>I tested with sqlplus, but AC is not working, the ORA-41412 is always reported, and the failover failed.<br />
+But, it is working fine with JDBC<br /></p>
+<p dir="ltr" style="margin-left: 20px; margin-right: 0px">How To Test Application Continuity Using A Standalone Java Program (Doc ID 1602233.1)</p>
+
+<p>However, the code has some problems, I modified it a little bit to demo NLS_DATE_FORMAT replay, transaction failover, and the replay of mutable SYS_GUID().<br />
+The sql we want to protect should be in between beginRequest() and endRequest() functions.<br />
+The database user must be grant “keep sysguid” for the mutable GUID replay to get the original GUID, otherwise, a new GUID will be used in replay.</p>
+
+<pre class="prettyprint lang-java linenums=1 ">
+SQL&gt; grant keep sysguid to ctais2;
+// AcTest.java
+import java.sql.*;
+import oracle.jdbc.*;
+public class AcTest
+{
+public static void main(String[] args) throws SQLException,java.lang.InterruptedException
+{
+oracle.jdbc.replay.OracleDataSource  AcDatasource = oracle.jdbc.replay.OracleDataSourceFactory.getOracleDataSource();
+AcDatasource.setURL("jdbc:oracle:thin:@rac-scan.rac.database.zhangqiaoc.com:1521/ac");
+AcDatasource.setUser("CTAIS2");
+AcDatasource.setPassword("oracle");
+
+Connection conn = AcDatasource.getConnection();
+
+conn.setAutoCommit(false);
+
+PreparedStatement stmt = conn.prepareStatement("select instance_name from v$instance");
+ResultSet rset = stmt.executeQuery();
+while (rset.next()){
+System.out.println("You are Connected to RAC Instance - "+ rset.getString(1));
+}
+
+
+stmt = conn.prepareStatement("select sys_guid() from dual");
+rset = stmt.executeQuery();
+while (rset.next()){
+System.out.println("GUID: "+rset.getString(1));
+} 
+
+// the code you want to protected should in between begin and end
+((oracle.jdbc.replay.ReplayableConnection)conn).beginRequest();
+stmt = conn.prepareStatement("alter session set nls_date_format='yyyymmdd hh24miss'");
+stmt.execute();
+stmt = conn.prepareStatement("insert into test1 values(1)");
+stmt.execute();
+stmt = conn.prepareStatement("insert into test2 values(sys_guid())");
+stmt.execute();
+Thread.currentThread().sleep(60000);
+
+// shutdown the pdb here
+PreparedStatement stmt1 = conn.prepareStatement("select instance_name from v$instance");
+ResultSet rset1 = stmt1.executeQuery();
+while (rset1.next()){
+System.out.println("After Replay Connected to RAC Instance - "+rset1.getString(1));
+}
+
+// NLS_DATE_FORMAT is replayed. 
+stmt1 = conn.prepareStatement("select value from v$nls_parameters where parameter='NLS_DATE_FORMAT'");
+rset1 = stmt1.executeQuery();
+while (rset1.next()){
+System.out.println("NLS_DATE_FORMAT: "+rset1.getString(1));
+} 
+
+stmt1 = conn.prepareStatement("select sys_guid() from dual");
+rset1 = stmt1.executeQuery();
+while (rset1.next()){
+System.out.println("GUID: "+rset1.getString(1));
+} 
+
+// finally, we can see the new record 
+conn.commit(); 
+
+rset.close();
+stmt.close();
+rset1.close();
+stmt1.close();
+
+conn.close();
+
+((oracle.jdbc.replay.ReplayableConnection)conn).endRequest();
+}
+}
+</pre>
+
+<p>Compile and Test</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+$ export PATH=/u01/app/18.3.0/grid/jdk/bin:$PATH
+$ export CLASSPATH=.:$CLASSPATH
+$ javac -Djava.ext.dirs=/u01/app/oracle/product/18.3/db_1/jdbc/lib AcTest.java
+$ java -Djava.ext.dirs=/u01/app/oracle/product/18.3/db_1/jdbc/lib:/u01/app/oracle/product/12.1/db_1/oc4j/lib  AcTest
+
+[oracle@database01 ~]$ java -Djava.ext.dirs=/u01/app/oracle/product/18.3/db_1/jdbc/lib:/u01/app/oracle/product/12.1/db_1/oc4j/lib  AcTest
+You are Connected to RAC Instance - orcl1
+GUID: 81D23D34DF307041E0532910105314FE          &lt;== original GUID
+                                                &lt;== shutdown instance 1
+After Replay Connected to RAC Instance - orcl2  &lt;== failover successful
+NLS_DATE_FORMAT: yyyymmdd hh24miss              &lt;== nls_date_format has been replayed.
+GUID: 81D240EFA652587FE0532A101053BBA8          &lt;== new GUID
+
+SQL&gt; select * from test1;
+
+	ID
+----------
+	 1                                      &lt;== transaction replay successful
+
+SQL&gt; select * from test2;
+
+ID
+--------------------------------
+81D23D34DF317041E0532910105314FE                &lt;== with transaction replay, the GUID is still the original value.
+</pre>
+
+<p>And, there is also a great advantage of AC is that it can notify the event of network down.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+$ sqlplus -ac ctais2/oracle@rac-scan.rac.database.zhangqiaoc.com:1521/ac @i.sql
+
+INSTANCE_NUMBER
+---------------
+	      2
+
+-- take the network of node 2 down
+-- # ifconfig net0 down
+
+SQL&gt; select count(*) from dba_objects, dba_objects;
+select count(*) from dba_objects, dba_objects
+*
+ERROR at line 1:
+ORA-12153: TNS:not connected
+Process ID: 2795
+Session ID: 254 Serial number: 59658
+
+
+SQL&gt; @i.sql
+ERROR:
+ORA-03114: not connected to ORACLE
+</pre>
+<p>There is a problem of connection failover of AC for SQLPLUS. But it actually shows that the connection can be broken.<br />
+Compare with TAF, the session will be there almost forever.</p>
+
+<p>Moreover, in 12c, discconect with service stop become my graceful, and there is no AC needed<br />
+Let’s see at first how switchover working in 11.2.0.4</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+SQL&gt; @i   
+
+INSTANCE_NUMBER
+---------------
+	      2
+
+-- $ srvctl stop service -d orcl -s taf -i orcl2 -f
+SQL&gt; /
+select instance_number from v$instance
+*
+ERROR at line 1:
+ORA-03113: end-of-file on communication channel
+Process ID: 27272
+Session ID: 99 Serial number: 123
+
+-- an error is reported, it is not graceful
+
+SQL&gt; /
+
+INSTANCE_NUMBER
+---------------
+	      1
+</pre>
+
+<p>In 12c, -f is working very similar to drain-out, no error will be reported. That makes swithover more graceful.<br /></p>
+<pre class="prettyprint lang-sql linenums=1 ">
+INSTANCE_NUMBER
+---------------
+	      2
+
+-- $ srvctl stop service -d orcl -s taf -i orcl2 -f
+SQL&gt; /
+
+INSTANCE_NUMBER
+---------------
+	      1
+</pre>
+
+<p>But it will still lead a problem that even kill -9 the session, this session will failover to the other instance gracefully. <br />
+If it is working with AC, the SQL and transaction will be replayed on the new instance, in this situation, we may needs to use the following SQL to disconnect session.</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+alter system kill session 'sid, serial#, @inst' noreplay;
+alter system disconnect session 'sid, serial#, @inst' noreplay;
+execute DBMS_SERVICE.DISCONNECT_SESSION(‘[service name]’, DBMS_SERVICE.NOREPLAY) ;
+</pre>
+
+<p>or stop service with noreplay</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+srvctl stop service -db orcl -instance orcl2 -service orcl_pdb38 -force -stop_option immediate -noreplay
+</pre>
+
+<p>By the way, the different in between “kill session” and “disconnect session” is that “kill session” marks session as killed and the session will be not disconnected until the user issues a new call. But “disconnect session” is a little like “kill -9” and the session will not be in v$session almost immediately.<br />
+For the session which is killed, cannot be failover to the new instance.<br />
+But, for the session which is disconnected or “kill -9” will be failover to the new instance, and the killed session is not failover and must be proactively reconnect.</p>
+
+<p>With AC<br /></p>
+<ol>
+  <li>All common database calls are replayed - SELECT, PL/SQL, ALTER SESSION, DML, DDL, COMMIT, ROLLBACK, SAVEPOINT, JDBC and OCI RPCs, and local JDBC and OCI calls.</li>
+  <li>All common database transaction types are replayed - local, parallel, remote, distributed, and transactions embedded within PL/SQL.</li>
+  <li>The mutable objects - sequence, date/time, GUIDs - are kept by “Grant Keep”</li>
+</ol>
+
+<p>The information which can be replayed is stored by driver on client, so the more cpu and memory are needed on client. It is recommended to allocate 4 to 8GB or more to JVM</p>
+
+<p>With Failover, normally, we don’t need to deal with Connection Errors any more, but we should handle Failover-related Errors. <br /></p>
+<p dir="ltr" style="margin-left: 20px; margin-right: 0px">Database Connection and Failover Errors Recognized by DBService (Doc ID 2268932.1)</p>
+
+<p>Connection errors<br />
+    ORA-1012	Not logged on<br />
+    ORA-1092	Instance terminated - likely via shutdown abort<br />
+    ORA-03113	End-of-file on communication channel<br />
+    ORA-3114	Not connected to ORACLE<br />
+    ORA-3135	Connection lost contact<br />
+    ORA-25403	Could not reconnect<br />
+    ORA-19755	Could not open change tracking file<br /></p>
+
+<p>Failover-related errors <br />
+    ORA-25401	Can not continue fetches<br />
+    ORA-25402	Transaction must roll back<br />
+    ORA-25405	Transaction status unknown<br />
+    ORA-25408	Can not safely replay call<br />
+    ORA-25409	Failover happened during the network operation (lost on fetching a LOB column)<br />
+    ORA-25425	Connection lost during rollback<br /></p>
+
+<p>The four goal can be archived by the ways I talked above.<br />
+But we ignored one thing - Transaction Guard<br /></p>
+
+<p>Transaction Guard is used to handle the situation that the commit is successful on the server, but, before the response returns to the driver/client, the instance down. So, after failover, a failure will be returned to client, it will make a lot of confusing <br />
+Without TG, in this situation, the application needs to search data to distinguish whether the commit is successful or failed.<br />
+For TG, it uses an object named Logical Transaction Identifier (LTXID) which is stored in the OCI session handle and in a connection object for the JDBC Thin and ODP.NET drivers.<br />
+The drivers can use LTXID to retrive related information to determine whether the commit is success. <br />
+With TG, AC can offer the failover of transaction.</p>
+:ET

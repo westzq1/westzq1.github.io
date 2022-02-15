@@ -1,0 +1,411 @@
+I"N;<p>Now, we are planning to move our backup to AWS. The old backup strategy is not good for this situation.<br />
+Because we cannot just change DISK to SBT_TAPE, we also want to have a copy of backup on disk.</p>
+
+<p>I decide:</p>
+<ol>
+  <li>Use FRA to store backup locally for the recovery windows period.</li>
+  <li>Backup FRA to AWS everyday after daily backup.</li>
+  <li>For monthly / weekly backup, backup to AWS directly.</li>
+  <li>Backup archivelog to AWS directly.</li>
+  <li>Use FRA to obsolete local backup and archivelog.</li>
+  <li>Using recovery window for obsolete of backup on disk.</li>
+  <li>The recovery window is set to 7 days for Disk, and using 35 days in the script for Tape.</li>
+</ol>
+
+<p>RMAN configuration:</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+CONFIGURE RETENTION POLICY TO RECOVERY WINDOW OF 7 DAYS;
+CONFIGURE BACKUP OPTIMIZATION ON;
+CONFIGURE DEFAULT DEVICE TYPE TO DISK; 
+CONFIGURE CONTROLFILE AUTOBACKUP ON;
+CONFIGURE ARCHIVELOG DELETION POLICY TO BACKED UP 1 TIMES TO 'SBT_TAPE';
+</pre>
+
+<p>Never configure any default channel attribute for sbt_type, except for archivelog deletion policy. <br />
+It helps you to keep from mistake of delete all.</p>
+
+<pre class="prettyprint lang-sql linenums=1 ">
+###########################################################
+# backup_keep_to_tape.rman
+###########################################################
+# 1 DATE
+# 2 MONTHLY/WEEKLY
+# 3 KEEP PERIOD
+run{
+allocate channel ch01 device type SBT_TAPE parms 'ENV=(ob_media_family=rman-testenv)';
+backup 
+  incremental level 0 
+  as compressed backupset 
+  filesperset=10 
+  tag='&amp;1_LEV0_&amp;2' 
+database 
+  keep until time 'sysdate+&amp;3';
+release channel ch01;
+}
+
+###########################################################
+# backup_database_to_disk.rman
+###########################################################
+# 1 DATE
+# 2 LEVEL 0/1/2
+# 3 "CUMULATIVE"/""
+run{
+allocate channel ch01 device type disk;
+backup 
+  incremental level &amp;2 &amp;3
+  as compressed backupset 
+  filesperset=10 
+  tag='&amp;1_LEV&amp;2_DAILY' 
+database 
+include current controlfile;
+release channel ch01;  
+}
+
+###########################################################
+# backup_fra_to_tape.rman
+###########################################################
+run{
+allocate channel ch01 device type SBT_TAPE parms 'ENV=(ob_media_family=rman-testenv)';
+backup 
+  filesperset=10 
+recovery area;
+release channel ch01;
+}
+
+###########################################################
+# backup_archive_to_tape.rman
+###########################################################
+run{
+allocate channel ch01 device type SBT_TAPE parms 'ENV=(ob_media_family=rman-testenv)';
+backup 
+  as compressed backupset
+  filesperset=10 
+archivelog all not backed up 1 times;
+release channel ch01;
+}
+
+###########################################################
+# backup_daily.rman
+###########################################################
+# 1 DATE
+# 2 LEVEL 0/1/2
+# 3 "CUMULATIVE"/""
+@backup_archive_to_tape.rman
+@backup_database_to_disk.rman &amp;1 &amp;2 "&amp;3"
+@backup_fra_to_tape.rman
+@backup_archive_to_tape.rman
+
+###########################################################
+# backup_release_fra.rman
+###########################################################
+run{
+allocate channel ch01 device type SBT_TAPE parms 'ENV=(ob_media_family=rman-testenv)';
+backup 
+  filesperset=10 
+recovery area 
+delete input
+;
+release channel ch01;
+}
+
+###########################################################
+# obsolete_fra.rman
+###########################################################
+run{
+allocate channel ch01 device type DISK;
+crosscheck backup DEVICE TYPE DISK;
+crosscheck copy DEVICE TYPE DISK;
+delete noprompt obsolete DEVICE TYPE DISK;
+release channel ch01;
+}
+
+###########################################################
+# obsolete_tape.rman
+###########################################################
+run{
+allocate channel ch01 device type SBT_TAPE parms 'ENV=(ob_media_family=rman-testenv)';
+crosscheck backup DEVICE TYPE SBT_TAPE;
+crosscheck copy DEVICE TYPE SBT_TAPE;
+delete noprompt obsolete recovery window of 60 days DEVICE TYPE SBT_TAPE;
+release channel ch01;
+}
+</pre>
+
+<p>Due to RMAN backups to AWS as to a tape library by using OSB, and I am using OSB + mhvtl to verify my strategy.</p>
+
+<p>Install mhvtl</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+# yum install mt-st mtx lsscsi sg3_utils lzo-minilzo
+# wget http://mirror.centos.org/centos/7/os/x86_64/Packages/lzo-devel-2.06-8.el7.x86_64.rpm
+# rpm -ivh lzo-devel-2.06-8.el7.x86_64.rpm
+
+# wget https://sites.google.com/site/linuxvtl2/mhvtl-2016-03-10.tgz?attredirects=0 --no-check-certificate
+# tar xvf mhvtl-2016-03-10.tgz
+# groupadd vtl
+# useradd -g vtl vtl
+# cd mhvtl-1.5
+# make distclean
+# cd kernel
+# make
+# make install
+# cd ..
+# make
+# make install
+# chown -R vtl:vtl /opt/mhvtl/
+# /etc/init.d/mhvtl start
+
+## 2 libraries, 4 tape drive for each.
+# lsscsi -g 
+[0:0:0:0]    disk    VMware,  VMware Virtual S 1.0   /dev/sda   /dev/sg0 
+[2:0:0:0]    cd/dvd  NECVMWar VMware IDE CDR10 1.00  /dev/sr0   /dev/sg1 
+[3:0:0:0]    mediumx STK      L700             0105  /dev/sch0  /dev/sg5 
+[3:0:1:0]    tape    IBM      ULT3580-TD5      0105  /dev/st0   /dev/sg2 
+[3:0:2:0]    tape    IBM      ULT3580-TD5      0105  /dev/st1   /dev/sg3 
+[3:0:3:0]    tape    IBM      ULT3580-TD4      0105  /dev/st2   /dev/sg4 
+[3:0:4:0]    tape    IBM      ULT3580-TD4      0105  /dev/st3   /dev/sg6 
+[3:0:8:0]    mediumx STK      L80              0105  /dev/sch1  /dev/sg11
+[3:0:9:0]    tape    STK      T10000B          0105  /dev/st4   /dev/sg7 
+[3:0:10:0]   tape    STK      T10000B          0105  /dev/st5   /dev/sg8 
+[3:0:11:0]   tape    STK      T10000B          0105  /dev/st6   /dev/sg9 
+[3:0:12:0]   tape    STK      T10000B          0105  /dev/st7   /dev/sg10
+
+## mhvtl processes, 8 for tape drives and 2 for libraries.
+# ps -ef|grep vtl
+vtl      10813     1  0 22:59 ?        00:00:00 vtltape -q 11 -v
+vtl      10816     1  0 22:59 ?        00:00:00 vtltape -q 12 -v
+vtl      10832     1  0 22:59 ?        00:00:00 vtltape -q 13 -v
+vtl      10837     1  0 22:59 ?        00:00:00 vtltape -q 14 -v
+vtl      10840     1  0 22:59 ?        00:00:00 vtltape -q 31 -v
+vtl      10847     1  0 22:59 ?        00:00:00 vtltape -q 32 -v
+vtl      10850     1  0 22:59 ?        00:00:00 vtltape -q 33 -v
+vtl      10858     1  0 22:59 ?        00:00:00 vtltape -q 34 -v
+vtl      10863     1  0 22:59 ?        00:00:00 vtllibrary -q 10 -v
+vtl      10867     1  0 22:59 ?        00:00:00 vtllibrary -q 30 -v
+root     10965  8701  0 23:00 pts/4    00:00:00 grep --color=auto vtl
+</pre>
+<p>Configuration Files: /etc/mhvtl <br />
+Device Files: /opt/mhvtl<br /></p>
+
+<p>The size of tapes is 500MB in default. In order to change to, modify CAPACITY in /etc/mhvtl/mhvtl.conf, and then, delete all folder in /etc/mhvtl, restart mhvtl.</p>
+
+<pre class="prettyprint lang-sh linenums=1 ">
+# pwd
+/opt/mhvtl
+#  dump_tape -f G03037TA
+Media density code: 0x4a
+Media type code   : 0x26
+Media description : STK T10KA media
+Tape Capacity     : 4294967296 (4096 MBytes)
+Media type        : Normal data
+Media             : read-write
+Remaining Tape Capacity : 4294967296 (4096 MBytes)
+Total num of filemarks: 0
+Segmentation fault (core dumped)
+</pre>
+
+<p>Install Oracle Secure Backup</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+# mkdir -p /usr/local/oracle/backup
+# cd /usr/local/oracle/backup
+# /tmp/osb_12.2.0.1.0_linux.x64_release/setup 
+
+# obtool
+Oracle Secure Backup 12.2.0.1.0
+login: admin
+Password: 12345678
+
+# define the server also as mediaserver
+ob&gt; lshost
+testenv          admin,client                      (via OB)   in service 
+ob&gt; chhost --addrole mediaserver testenv
+ob&gt; lshost
+testenv          admin,mediaserver,client          (via OB)   in service 
+
+# create a user named oracle, which is the oracle user name, and allow rman and cmdline to login.
+ob&gt; lsuser
+admin            admin
+ob&gt; mkuser -p 12345678  -c oracle -U oracle -G dba -N no -e westzq@gmail.com -h *:*:*+rman+cmdline oracle
+ob&gt; lsuser
+admin            admin
+oracle           oracle
+
+# create a media group 
+ob&gt; mkmf -u -C -a rman-testenv
+ob&gt; lsmf -l rman-testenv
+rman-testenv:
+    Keep volume set:        content manages reuse
+    Appendable:             yes
+    Volume ID used:         unique to this media family
+    UUID:                   cc2f973a-23af-1037-ae7d-000c293757c5
+
+# define library and driver
+# lsscsi -g
+[1:0:0:0]    cd/dvd  NECVMWar VMware IDE CDR10 1.00  /dev/sr0   /dev/sg1 
+[2:0:0:0]    disk    VMware,  VMware Virtual S 1.0   /dev/sda   /dev/sg0 
+[3:0:0:0]    mediumx STK      L700             0105  /dev/sch0  /dev/sg10
+[3:0:1:0]    tape    IBM      ULT3580-TD5      0105  /dev/st0   /dev/sg2 
+[3:0:2:0]    tape    IBM      ULT3580-TD5      0105  /dev/st2   /dev/sg4 
+[3:0:3:0]    tape    IBM      ULT3580-TD4      0105  /dev/st1   /dev/sg3 
+[3:0:4:0]    tape    IBM      ULT3580-TD4      0105  /dev/st4   /dev/sg6 
+[3:0:8:0]    mediumx STK      L80              0105  /dev/sch1  /dev/sg11
+[3:0:9:0]    tape    STK      T10000B          0105  /dev/st3   /dev/sg5 
+[3:0:10:0]   tape    STK      T10000B          0105  /dev/st5   /dev/sg7 
+[3:0:11:0]   tape    STK      T10000B          0105  /dev/st6   /dev/sg8 
+[3:0:12:0]   tape    STK      T10000B          0105  /dev/st7   /dev/sg9 
+
+ob&gt; mkdev -t library -o -a testenv:/dev/sg10 lib01
+ob&gt; mkdev -t library -o -a testenv:/dev/sg11 lib02
+
+ob&gt; mkdev -t tape -o -a testenv:/dev/sg2 -l lib01 -d 1 tape01
+ob&gt; mkdev -t tape -o -a testenv:/dev/sg3 -l lib01 -d 2 tape02
+ob&gt; mkdev -t tape -o -a testenv:/dev/sg4 -l lib01 -d 3 tape03
+ob&gt; mkdev -t tape -o -a testenv:/dev/sg5 -l lib01 -d 4 tape04
+ob&gt; mkdev -t tape -o -a testenv:/dev/sg6 -l lib02 -d 1 tape05
+ob&gt; mkdev -t tape -o -a testenv:/dev/sg7 -l lib02 -d 2 tape06
+ob&gt; mkdev -t tape -o -a testenv:/dev/sg8 -l lib02 -d 3 tape07
+ob&gt; mkdev -t tape -o -a testenv:/dev/sg9 -l lib02 -d 4 tape08
+
+# the device name may be changed, refer this article to change.
+Oracle Secure Backup 12.1.0.1.0 - All Backup jobs to tape failing with Error message: Pending resource availability (Doc ID 2144552.1)	
+
+# after definition
+ob&gt; lsdev
+library             lib01            in service          
+  drive 1           tape01           in service          
+  drive 2           tape02           in service          
+  drive 3           tape03           in service          
+  drive 4           tape04           in service          
+library             lib02            in service          
+  drive 1           tape05           in service          
+  drive 2           tape06           in service          
+  drive 3           tape07           in service          
+  drive 4           tape08           in service          
+  
+ob&gt; inventory -L lib01
+ob&gt; inventory -L lib02
+
+# For testing
+run{
+allocate channel ch01 device type sbt parms 'ENV=(ob_media_family=rman-testenv)';
+backup spfile;
+}
+
+# after backup, we can see our backup jobs and pieces
+ob&gt; lsvol -a
+    VOID    OOID Seq Volume ID          Barcode     Family      Created     Attributes
+     173     173   1 rman-testenv-000001 G03001TA    rman-testenv 03/07.23:13 never closes; content manages reuse 
+     175     175   1 rman-testenv-000002 G03002TA    rman-testenv 03/07.23:14 never closes; content manages reuse 
+
+ob&gt; lspiece
+    POID Database   Content    Copy Created      Host             Piece name
+     100 o12201     full          0 03/07.23:13  testenv          g8trsfk9_1_1
+     101 o12201     full          0 03/07.23:13  testenv          c-766629926-20190307-00
+     102 o12201     full          0 03/07.23:14  testenv          gbtrsfm9_1_1
+     103 o12201     full          0 03/07.23:14  testenv          gatrsfm9_1_1
+     104 o12201     full          0 03/07.23:14  testenv          gdtrsfnd_1_1
+     105 o12201     full          0 03/07.23:14  testenv          gctrsfnd_1_1
+     106 o12201     full          0 03/07.23:15  testenv          getrsfo6_1_1
+     107 o12201     full          0 03/07.23:15  testenv          gftrsfo6_1_1
+     108 o12201     full          0 03/07.23:15  testenv          c-766629926-20190307-01
+</pre>
+
+<p>After configuration, we can do testing now</p>
+<pre class="prettyprint lang-sh linenums=1 ">
+RO="su - oracle -c "
+RMAN="cd /home/oracle/rman; export ORACLE_SID=o12201; export ORAENV_ASK=NO; . oraenv; rman target / "
+timedatectl set-ntp no
+for YEAR in {2018..2018}
+do
+  for MONTH in {1..7}
+  do
+    for DAY in {1..28}
+    do
+      for HOUR in {0,12}
+      do 
+        echo $$
+        n=$(($DAY%7))
+        # echo $YEAR" "$MONTH" "$DAY" "$HOUR" "$n;
+        timedatectl set-time "$YEAR-$MONTH-$DAY $HOUR:00:00";
+        if [[ $n -eq 1 &amp;&amp; $DAY -le 7 &amp;&amp; HOUR -eq 0 ]]; then
+          echo "lev0 monthly backup"
+$RO "$RMAN &lt;&lt;EOF
+@backup_keep_to_tape.rman `date +%Y%m%d%H` \"MONTHLY\" 180
+EOF
+"
+        elif [[ $n -eq 1 &amp;&amp; $DAY -ge 8 &amp;&amp; HOUR -eq 0 ]]; then
+          echo "lev0 weekly backup"
+$RO "$RMAN &lt;&lt;EOF
+@backup_keep_to_tape.rman `date +%Y%m%d%H` \"WEEKLY\" 90
+EOF
+"
+        elif [[ $n -eq 2 &amp;&amp; HOUR -eq 0 ]]; then
+          echo "lev0 daily backup"
+$RO "$RMAN &lt;&lt;EOF
+@backup_daily.rman `date +%Y%m%d%H` 0 \"\"
+EOF
+"
+        elif [[ $n -eq 3 &amp;&amp; HOUR -eq 0 ]]; then
+          echo "lev2 daily backup"
+$RO "$RMAN &lt;&lt;EOF
+@backup_daily.rman `date +%Y%m%d%H` 2 \"\"
+EOF
+"       
+        elif [[ $n -eq 4 &amp;&amp; HOUR -eq 0 ]]; then
+          echo "lev1 daily backup"
+$RO "$RMAN &lt;&lt;EOF
+@backup_daily.rman `date +%Y%m%d%H` 1 \"\"
+EOF
+"
+        elif [[ $n -eq 5 &amp;&amp; HOUR -eq 0 ]]; then
+          echo "lev1 daily backup"
+$RO "$RMAN &lt;&lt;EOF
+@backup_daily.rman `date +%Y%m%d%H` 1 \"CUMULATIVE\"
+EOF
+"
+        elif [[ $n -eq 6 &amp;&amp; HOUR -eq 0 ]]; then
+          echo "lev2 daily backup"
+$RO "$RMAN &lt;&lt;EOF
+@backup_daily.rman `date +%Y%m%d%H` 2 \"\"
+EOF
+"
+        elif [[ $n -eq 7 &amp;&amp; HOUR -eq 0 ]]; then
+          echo "lev1 daily backup"
+$RO "$RMAN &lt;&lt;EOF
+@backup_daily.rman `date +%Y%m%d%H` 1 \"\"
+EOF
+"
+        else
+          echo "archive log backup"
+$RO "$RMAN &lt;&lt;EOF
+@backup_archive_to_tape.rman
+EOF
+"
+        fi
+      done
+    done
+  done
+done
+</pre>
+
+<p>With this configuration,<br />
+When you try to delete all obsolete with default recovery window:</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+RMAN&gt; delete obsolete; 
+
+RMAN retention policy will be applied to the command
+RMAN retention policy is set to recovery window of 7 days
+using channel ORA_DISK_1
+Deleting the following obsolete backups and copies:
+Type                 Key    Completion Time    Filename/Handle
+-------------------- ------ ------------------ --------------------
+Backup Set           4073   09-MAY-18         
+  Backup Piece       4419   09-MAY-18          5it2dqhb_1_2
+Backup Set           4074   09-MAY-18         
+  Backup Piece       4420   09-MAY-18          5jt2dqk1_1_2
+Backup Set           4078   09-MAY-18         
+  Backup Piece       4424   09-MAY-18          5nt2dqp7_1_1
+Backup Set           4080   09-MAY-18         
+  Backup Piece       4426   09-MAY-18          5pt2f4m4_1_1
+
+</pre>
+:ET

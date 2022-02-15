@@ -1,0 +1,42 @@
+I"É<p>For the test propose, I want to save some resource, so I decided to start two management processes for PRIMARY and STANDBY clusters on the same machine.</p>
+
+<p>Unfortunately, we cannot just invoke ndb_mgmd with different configuration files twice, because some files on disk will be overwritten.</p>
+
+<p>We have to do the following things:</p>
+
+<p><b>Two folders for the cache of configuration files</b></p>
+<ol>
+  <li>/usr/local/mysql/mysql-cluster</li>
+  <li>/usr/local/mysql/mysql-standby</li>
+</ol>
+
+<p><b>Two DataDir folders which used for log files and lock files, if using the same NodeId number for both clusters.</b></p>
+<ol>
+  <li>/var/lib/mysql-cluster</li>
+  <li>/var/lib/mysql-standby</li>
+</ol>
+
+<p><b>Two configuration files</b></p>
+<ol>
+  <li>/var/lib/mysql-cluster/config.ini</li>
+  <li>/var/lib/mysql-cluster/standby.ini</li>
+</ol>
+
+<p><b>Change the following parameters for standby cluster.</b></p>
+<ol>
+  <li>DataDir, if using the same NodeId for the management node&lt;/li&gt;</li>
+  <li>NodeId, if using the same DataDir for the management node&lt;/li&gt;</li>
+  <li>PortNumber in [ndb_mgmd]&lt;/li&gt;</li>
+  <li>ServerPort in [ndbd default] if the standby cluster on the same machines with primary cluster.</li>
+  <li>The data node / sql node information in [ndbd] and [mysqld]</li>
+</ol>
+
+<p>For my configuration
+<img src="/images/20181227.1.png" /></p>
+
+<p>Then, start the Primary Cluster</p>
+<pre class="prettyprint lang-sh linenums=1 ">/usr/local/mysql/bin/ndb_mgmd -f /var/lib/mysql-cluster/config.ini</pre>
+
+<p>Next, the Standby Cluster</p>
+<pre class="prettyprint lang-sh linenums=1 ">/usr/local/mysql/bin/ndb_mgmd -f /var/lib/mysql-cluster/standby.ini --configdir /usr/local/mysql/mysql-standby</pre>
+:ET

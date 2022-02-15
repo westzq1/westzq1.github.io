@@ -1,0 +1,10 @@
+I"È<p><span style="color:#ff0000;"><strong>1. BEP</strong></span></p>
+<pre class="prettyprint linenums=1 ">
+1. Set up Server TrustStore, copy from RabbitMQ we set up in the previous article.
+# mkdir /l01/app/oracle/rabbitmqcertificates
+# cp "emb1.pprd.odu.edu folder"/server/cert.pem -&gt; /l01/app/oracle/rabbitmqcertificates
+# cp "emb1.pprd.odu.edu folder"/client/keycert.p12 -&gt; /l01/app/oracle/rabbitmqcertificates
+
+Create a new truststore file 
+</pre>
+:ET

@@ -1,0 +1,152 @@
+I"~<p>For security reason, we need to remove some unsafe cipher suites on Tomcat. And after removing, there are only two cipher suites left: TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA</p>
+
+<p>After restart, the webpage is not accessible. An error is reported in the catalina.out</p>
+
+<pre class="prettyprint lang-sql linenums=1 ">Caused by: java.lang.IllegalArgumentException: None of the [ciphers] specified are supported by the SSL engine
+ : [[TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA]]
+	at org.apache.tomcat.util.net.SSLUtilBase.getEnabled(SSLUtilBase.java:90)
+	at org.apache.tomcat.util.net.SSLUtilBase.(SSLUtilBase.java:64)
+	at org.apache.tomcat.util.net.jsse.JSSEUtil.(JSSEUtil.java:142)
+	at org.apache.tomcat.util.net.jsse.JSSEImplementation.getSSLUtil(JSSEImplementation.java:49)
+	at org.apache.tomcat.util.net.AbstractJsseEndpoint.createSSLContext(AbstractJsseEndpoint.java:102)
+</pre>
+
+<p>The available cipher suites is related with JDK. So, for this one, the environment of Tomcat is</p>
+<pre class="prettyprint lang-sql linenums=1 "><strong>$ java -cp lib/catalina.jar org.apache.catalina.util.ServerInfo</strong>
+Server version: Apache Tomcat/8.5.20
+Server built: Aug 2 2017 21:35:49 UTC
+Server number: 8.5.20.0
+OS Name: Linux
+OS Version: 2.6.32-754.3.5.el6.x86_64
+Architecture: amd64
+<span style="color:#ff0000;"><strong>JVM Version: 1.7.0_51-b13</strong></span>
+JVM Vendor: Oracle Corporation
+</pre>
+
+<p>The another one which is working is:</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+<strong>$ java -cp lib/catalina.jar org.apache.catalina.util.ServerInfo</strong>
+Server version: Apache Tomcat/8.5.20
+Server built: Aug 2 2017 21:35:49 UTC
+Server number: 8.5.20.0
+OS Name: Linux
+OS Version: 3.10.0-862.14.4.el7.x86_64
+Architecture: amd64
+<strong><span style="color:#ff0000;">JVM Version: 1.7.0_161-b13</span></strong>
+JVM Vendor: Oracle Corporation
+</pre>
+
+<p>We can see, this one is 1.7.0_51-b13, another which is working is 1.7.0_161-b13</p>
+
+<p>Using the following java to list the supported cipher suites.
+https://confluence.atlassian.com/stashkb/list-ciphers-used-by-jvm-679609085.html</p>
+
+<pre class="prettyprint"><code class="language-java">import java.util.Iterator;
+import java.util.Map;
+import java.util.TreeMap;
+import javax.net.ssl.SSLServerSocketFactory;
+
+public class Ciphers
+{
+    public static void main(String[] args)
+        throws Exception
+    {
+        SSLServerSocketFactory ssf = (SSLServerSocketFactory)SSLServerSocketFactory.getDefault();
+
+        String[] defaultCiphers = ssf.getDefaultCipherSuites();
+        String[] availableCiphers = ssf.getSupportedCipherSuites();
+
+        TreeMap ciphers = new TreeMap();
+
+        for(int i=0; i&lt;availableCiphers.length; ++i )
+            ciphers.put(availableCiphers[i], Boolean.FALSE);
+
+        for(int i=0; i&lt;defaultCiphers.length; ++i )
+            ciphers.put(defaultCiphers[i], Boolean.TRUE);
+
+        System.out.println("Default\tCipher");
+        for(Iterator i = ciphers.entrySet().iterator(); i.hasNext(); ) {
+            Map.Entry cipher=(Map.Entry)i.next();
+
+            if(Boolean.TRUE.equals(cipher.getValue()))
+                System.out.print('*');
+            else
+                System.out.print(' ');
+
+            System.out.print('\t');
+            System.out.println(cipher.getKey());
+        }
+    }
+}
+</code></pre>
+<pre class="prettyprint linenums=1 ">
+<strong>$ java Ciphers</strong>
+Default Cipher
+SSL_DHE_DSS_EXPORT_WITH_DES40_CBC_SHA
+* SSL_DHE_DSS_WITH_3DES_EDE_CBC_SHA
+SSL_DHE_DSS_WITH_DES_CBC_SHA
+SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA
+* SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA
+SSL_DHE_RSA_WITH_DES_CBC_SHA
+SSL_DH_anon_EXPORT_WITH_DES40_CBC_SHA
+SSL_DH_anon_EXPORT_WITH_RC4_40_MD5
+SSL_DH_anon_WITH_3DES_EDE_CBC_SHA
+SSL_DH_anon_WITH_DES_CBC_SHA
+SSL_DH_anon_WITH_RC4_128_MD5
+SSL_RSA_EXPORT_WITH_DES40_CBC_SHA
+SSL_RSA_EXPORT_WITH_RC4_40_MD5
+* SSL_RSA_WITH_3DES_EDE_CBC_SHA
+SSL_RSA_WITH_DES_CBC_SHA
+SSL_RSA_WITH_NULL_MD5
+SSL_RSA_WITH_NULL_SHA
+* SSL_RSA_WITH_RC4_128_MD5
+* SSL_RSA_WITH_RC4_128_SHA
+* TLS_DHE_DSS_WITH_AES_128_CBC_SHA
+* TLS_DHE_DSS_WITH_AES_128_CBC_SHA256
+* TLS_DHE_RSA_WITH_AES_128_CBC_SHA
+* TLS_DHE_RSA_WITH_AES_128_CBC_SHA256
+TLS_DH_anon_WITH_AES_128_CBC_SHA
+TLS_DH_anon_WITH_AES_128_CBC_SHA256
+* TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA
+* TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA
+* TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
+TLS_ECDHE_ECDSA_WITH_NULL_SHA
+* TLS_ECDHE_ECDSA_WITH_RC4_128_SHA
+* TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA
+* TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA
+* TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
+TLS_ECDHE_RSA_WITH_NULL_SHA
+* TLS_ECDHE_RSA_WITH_RC4_128_SHA
+* TLS_ECDH_ECDSA_WITH_3DES_EDE_CBC_SHA
+* TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA
+* TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA256
+TLS_ECDH_ECDSA_WITH_NULL_SHA
+* TLS_ECDH_ECDSA_WITH_RC4_128_SHA
+* TLS_ECDH_RSA_WITH_3DES_EDE_CBC_SHA
+* TLS_ECDH_RSA_WITH_AES_128_CBC_SHA
+* TLS_ECDH_RSA_WITH_AES_128_CBC_SHA256
+TLS_ECDH_RSA_WITH_NULL_SHA
+* TLS_ECDH_RSA_WITH_RC4_128_SHA
+TLS_ECDH_anon_WITH_3DES_EDE_CBC_SHA
+TLS_ECDH_anon_WITH_AES_128_CBC_SHA
+TLS_ECDH_anon_WITH_NULL_SHA
+TLS_ECDH_anon_WITH_RC4_128_SHA
+* TLS_EMPTY_RENEGOTIATION_INFO_SCSV
+TLS_KRB5_EXPORT_WITH_DES_CBC_40_MD5
+TLS_KRB5_EXPORT_WITH_DES_CBC_40_SHA
+TLS_KRB5_EXPORT_WITH_RC4_40_MD5
+TLS_KRB5_EXPORT_WITH_RC4_40_SHA
+TLS_KRB5_WITH_3DES_EDE_CBC_MD5
+TLS_KRB5_WITH_3DES_EDE_CBC_SHA
+TLS_KRB5_WITH_DES_CBC_MD5
+TLS_KRB5_WITH_DES_CBC_SHA
+TLS_KRB5_WITH_RC4_128_MD5
+TLS_KRB5_WITH_RC4_128_SHA
+* TLS_RSA_WITH_AES_128_CBC_SHA
+* TLS_RSA_WITH_AES_128_CBC_SHA256
+TLS_RSA_WITH_NULL_SHA256
+</pre>
+
+<p>We can see the cipher suites I want to use are not on the list.
+Actually, we can add new cipher suites. But because this JDK is too old, we decided to upgrade to OPENJDK 1.8 this time.</p>
+:ET

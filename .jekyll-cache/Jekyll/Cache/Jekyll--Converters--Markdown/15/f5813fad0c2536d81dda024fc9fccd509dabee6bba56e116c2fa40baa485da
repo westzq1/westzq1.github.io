@@ -1,0 +1,43 @@
+I"U<p><br />The template New_Database.dbt is used to run the script to create a database.
+<br />Using -dbOptions to disable all unecessary componments.</p>
+
+<pre class="prettyprint lang-sh linenums=1 ">
+dbca -silent -createDatabase \
+  -sid PHUB \
+  -gdbName PHUB.WORLD \
+  -templateName New_Database.dbt \
+  -datafileDestination /data01/app/oracle/oradata \
+  -systemPassword oracle \
+  -sysPassword oracle \
+  -characterSet US7ASCII \
+  -storageType FS \
+  -databaseConfigType SINGLE \
+  -emConfiguration NONE \
+  -dvConfiguration false \
+  -enableArchive false \
+  -memoryMgmtType AUTO_SGA \
+  -useOMF true\
+  -sampleSchema false \
+  -dbOptions APEX:false,JSERVER:false,DV:false,SPATIAL:false,CWMLITE:false,ORACLE_TEXT:false,IMEDIA:false,XDB_PROTOCOLS:false
+</pre>
+
+<p><span style="color:#ff0000;"><strong>OWM will be installed. I don’t find the option name of it. We can deinstall OWM after creation.</strong></span></p>
+<pre class="prettyprint lang-sql linenums=1 ">
+select * from all_wm_versioned_tables;  -- return 0
+$ORACLE_HOME/rdbms/admin/owmuinst.plb
+</pre>
+
+<p><span style="color:#ff0000;"><strong>XDB is mandatory after 12.1</strong></span></p>
+
+<p>The list of componments installed:</p>
+<pre class="prettyprint lang-sql linenums=1 ">
+SQL&gt; select COMP_NAME, VERSION from dba_registry;
+
+COMP_NAME						     VERSION
+------------------------------------------------------------ ------------------------------
+Oracle Database Catalog Views				     19.0.0.0.0
+Oracle Database Packages and Types			     19.0.0.0.0
+Oracle Real Application Clusters			     19.0.0.0.0
+Oracle XML Database					     19.0.0.0.0
+</pre>
+:ET
